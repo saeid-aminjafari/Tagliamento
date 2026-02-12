@@ -58,7 +58,7 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # -------------------------
     # FIGURE
     # -------------------------
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(10, 12))
 
     # Municipality borders only
     muni.boundary.plot(ax=ax, linewidth=0.8, color="black")
@@ -82,8 +82,22 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # -------------------------
     # LEGEND
     # -------------------------
-    river_patch = mpatches.Patch(color="royalblue", label="Tagliamento River")
-    ax.legend(handles=[river_patch], loc="upper right", fontsize=12)
+    #river_patch = mpatches.Patch(color="royalblue", label="Tagliamento River")
+    #ax.legend(handles=[river_patch], loc="upper right", fontsize=12)
+
+    river_handle = mpatches.Patch(color="royalblue", label="Tagliamento River")
+    muni_handle = mpatches.Patch(
+    facecolor="none",
+    edgecolor="black",
+    linewidth=1,
+    label="Municipality Boundaries"
+    )
+
+    ax.legend(
+    handles=[river_handle, muni_handle],
+    loc="upper right",
+    fontsize=12
+    )
 
     # -------------------------
     # NORTH ARROW
