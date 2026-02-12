@@ -1,31 +1,20 @@
-# National-Scale, Satellite-Based Monitoring System for Sweden’s Surface Water Dynamics
+#  Tagliamento River Basin: Landuse and flood hazard exposure change between 1950 and 2000
 
 ## Research Question
-**The scientific overarching question Q1: How do the variations in waterstorage and water flow correlate with climate change indicators, anthropogenic activities, and socioeconomicand ecosystem changes?**
-
-To answer Q1, I formulate four methodological questions:
-How can integrated satellite observations from ICESat-2 and SWOT improve our understanding of spatialand temporal variations in water levels and extents across Sweden's diverse aquatic ecosystems?
-How will the integration of NISAR's L-band SAR data enhance the detection and quantification of waterextent in Sweden’s densely vegetated wetlands and flooded forests compared to Ka-band and existing C-band SAR data?
-How will machine learning and statistical methodologies can identify the drivers and implications ofwater storage and flow changes?
-What are the methodological advancements and accuracies gained from employing machine learning algorithms in processing satellite data and hydrological modelling in predicting future water storage and flow dynamics under various climate scenarios in Sweden?
+**The scientific question: How has landuse changed in Tagliamento River Basin and how has these changes exposed different landcovers to flood hazard?**
 
 ## Aim
-In-depth Analysis of Environmental Impact: Analyse what are the factorsof the changes in water storage and water flow and how they affect ecosystem services, and provide actionable insights for policy and decision-making
+In-depth Analysis of landuse and exposrue change.
 
 ## Objectives
-- Comprehensive Monitoring of Water Storage and Water Flow: Extend and refine the monitoring of waterlevels, water extent, and flow dynamics across Sweden's surface waters, utilizing cutting-edge satellitetechnology and data integration from ICESat-2, SWOT, and NISAR missions.
-- Removing the spatial pattern of post-glacial rebound from the measured water level data with the help ofInSAR.
-- Integration of Advanced Data Processing Techniques: Employ machine learning alongside conventionalmethods to process and analyse satellite data, enabling a more nuanced understanding of water dynamics.
-- Enhanced Hydrological Modelling: Improve and validate hydrological models, such as HYPE, byincorporating satellite data and machine learning to better predict future trends and respond toenvironmental changes.
+- Investigating the landuse changed in every municipality through 1950-2000?
+- Which landuse has changed more drastically? Which decade most of the change happened? Which municipality was the most affected.
+- How different scenarios of flood hazard paly a role in landuse changes? How exposed are the most residential and agricultral lands to the flood?
 
 ## Output
-- A dataset of processed lake water levels from 2018 to the present and water extent from 2023 inNETCDF format that will be stored in the Database of the Bolin Centre for Climate Research (freelyavailable).
-- Paper #1: “Data for Swedish lake water levels and their changes from 2018” - potential journal: EarthSystem Science Data (Copernicus Publications)
-- A dataset of surface water extent covering all wetlands and lakes that will be stored in the Database ofthe Bolin Centre for Climate Research (freely available).
-- Paper #2: “Surface Water Extent in Nordic Wetlands Using NISAR L-band Data and Deep Learning”- potential journal: Remote Sensing of Environment (Elsevier)
-- Paper #3: “Spatial and Temporal Dynamics of Water Storage and Water Flow in Swedish WaterBodies” - potential journal: Water Resources Research (American Geophysical Union)
-- A new update to the HYPE hydrological model that can be used by the SMHI
-- Paper #4: “Integration of Satellite Altimetry and Long-Wavelength SAR data with HYPEHydrological model” - potential journal: Journal of Hydrology (Elsevier)
+- Two Python scripts on this GitHub repository (Tagliamento), **Tagliamento.py** and **Figures_neat.py** to calculate the areas under each landuse and municipality and create figures of the changes respectively. 
+- A CSV table, containting the landuse area change in every municipality and every decade.
+- Paper #1: “Title XXX”- potential journal: XXX
 
 ---
 
