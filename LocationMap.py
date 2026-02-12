@@ -72,7 +72,7 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
             ax.text(
                 x, y,
                 str(int(pid)),
-                fontsize=11,   # increased size
+                fontsize=12,   # increased size
                 ha="center",
                 va="center",
                 weight="bold"
@@ -82,7 +82,7 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # LEGEND
     # -------------------------
     river_patch = mpatches.Patch(color="royalblue", label="Tagliamento River")
-    ax.legend(handles=[river_patch], loc="upper right")
+    ax.legend(handles=[river_patch], loc="upper right", fontsize=12)
 
     # -------------------------
     # NORTH ARROW
@@ -101,9 +101,9 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # -------------------------
     # COORDINATES IN DEGREES
     # -------------------------
-    ax.set_xlabel("Longitude (°)")
-    ax.set_ylabel("Latitude (°)")
-    ax.tick_params(labelsize=9)
+    ax.set_xlabel("Longitude (°)", fontsize=14)
+    ax.set_ylabel("Latitude (°)", fontsize=14)
+    ax.tick_params(labelsize=14)
 
     # Optional grid
     ax.grid(True, linestyle="--", linewidth=0.3, alpha=0.5)
@@ -111,14 +111,14 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # -------------------------
     # INSET MAP (Italy) — LOWER LEFT
     # -------------------------
-    axins = inset_axes(ax, width="30%", height="30%", loc="lower left")
+    axins = inset_axes(ax, width="37%", height="37%", loc="lower left")
 
     italy.boundary.plot(ax=axins, linewidth=0.5, color="gray")
-    muni.boundary.plot(ax=axins, linewidth=1.2, color="red")
+    muni.boundary.plot(ax=axins, linewidth=1.8, color="red")
 
     axins.set_xticks([])
     axins.set_yticks([])
-    axins.set_title("Italy", fontsize=8)
+    axins.set_title("Italy", fontsize=12)
 
     # -------------------------
     plt.tight_layout()
