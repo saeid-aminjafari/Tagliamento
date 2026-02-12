@@ -5,6 +5,7 @@ from pathlib import Path
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib_scalebar.scalebar import ScaleBar
 import matplotlib.patches as mpatches
+import matplotlib.ticker as mticker
 
 BASE = Path(r"C:\Users\saeed\OneDrive\TagRiv260205")
 OUT = BASE / "outputs"
@@ -102,11 +103,16 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # COORDINATES IN DEGREES
     # -------------------------
     ax.set_xlabel("Longitude (°)", fontsize=14)
-    ax.set_ylabel("Latitude (°)", fontsize=14)
+    ax.set_ylabel("Latitude (°)", fontsize=14, rotation=90)
+       
     ax.tick_params(labelsize=14)
+    ax.tick_params(axis='y', labelrotation=90)
+
+    ax.xaxis.set_major_locator(mticker.MultipleLocator(0.3))
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(0.3))
 
     # Optional grid
-    ax.grid(True, linestyle="--", linewidth=0.3, alpha=0.5)
+    ax.grid(True, linestyle="--", linewidth=0.2, alpha=0.3)
 
     # -------------------------
     # INSET MAP (Italy) — LOWER LEFT
