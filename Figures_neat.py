@@ -681,8 +681,143 @@ fig_panel_baseline_baseline_delta_pct(
 
 
 # ============================================================
-# EXTRA FIG (6,7,8) — Scatter: baseline share (%) vs Δ share (%) by municipality
+# FIG 6 — Scatter: baseline share (%) vs Δ share (%) by municipality
 # ============================================================
+
+def fig6_scatter_three_vertical_panels(
+    df_in: pd.DataFrame,
+    muni_shp: Path,
+    macros: List[str],
+    year0: int,
+    year1: int,
+    outpath: Path,
+    highlight_ids: List[int] = [15],   # e.g., [15]
+    label_top_n: int = 10,              # label top-N |Δ| per panel
+    label_extreme_baseline_n: int = 10, # optionally label top-N baseline too
+    font_size: int = 12,
+    point_size: int = 35,
+    highlight_size: int = 90,
+):
+
+    if highlight_ids is None:
+        highlight_ids = [15]
+
+    if gpd is None:
+        print("GeoPandas not available -> skipping scatter.")
+        return
+
+    muni = gpd.read_file(muni_shp)
+    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+
+    muni_area = get_muni_area_km2(muni)
+    muni_ids = make_muni_id_table(muni)
+
+    fig, axes = plt.subplots(len(macros), 1, figsize=(8.5, 10.5))
+    if len(macros) == 1:
+        axes = [axes]
+
+    for i, macro in enumerate(macros):
+        ax = axes[i]
+
+        base = macro_share_pct_by_year(df_in, year0, macro, muni_area).rename(columns={"share_pct": "baseline_pct"})
+        end  = macro_share_pct_by_year(df_in, year1, macro, muni_area).rename(columns={"share_pct": "end_pct"})
+
+        x = base.merge(end, on=MUNI_ID, how="outer").fillna(0.0)
+        x["delta_pct"] = x["end_pct"] - x["baseline_pct"]
+
+        x = muni_ids.merge(x, on=MUNI_ID, how="left").fillna(
+            {"baseline_pct": 0.0, "end_pct": 0.0, "delta_pct": 0.0}
+        )
+
+        # ---- choose which points to label ----
+        to_label = set()
+
+        # always label explicit highlight IDs if present
+        for hid in highlight_ids:
+            if hid in set(x["pt_id"].astype(int).tolist()):
+                to_label.add(int(hid))
+
+        # label top-N by |delta|
+        if label_top_n and label_top_n > 0:
+            top_delta = x.assign(absd=x["delta_pct"].abs()).nlargest(label_top_n, "absd")
+            to_label.update(top_delta["pt_id"].astype(int).tolist())
+
+        # optionally label top-N baseline (extreme right side)
+        if label_extreme_baseline_n and label_extreme_baseline_n > 0:
+            top_base = x.nlargest(label_extreme_baseline_n, "baseline_pct")
+            to_label.update(top_base["pt_id"].astype(int).tolist())
+
+        # ---- plot base points ----
+        ax.scatter(x["baseline_pct"], x["delta_pct"], s=point_size, alpha=0.9)
+
+        # ---- highlight specific municipalities ----
+        mask_h = x["pt_id"].astype(int).isin(highlight_ids)
+        if mask_h.any():
+            ax.scatter(
+                x.loc[mask_h, "baseline_pct"],
+                x.loc[mask_h, "delta_pct"],
+                s=highlight_size,
+                edgecolor="black",
+                linewidth=1.2,
+                zorder=5
+            )
+
+        # reference lines
+        ax.axhline(0, linewidth=0.8)
+        ax.axvline(0, linewidth=0.8)
+
+        # panel-specific limits (keep RS readable)
+        x_margin = 0.06 * (x["baseline_pct"].max() - x["baseline_pct"].min() + 1e-6)
+        y_margin = 0.08 * (x["delta_pct"].max() - x["delta_pct"].min() + 1e-6)
+
+        ax.set_xlim(x["baseline_pct"].min() - x_margin, x["baseline_pct"].max() + x_margin)
+        ax.set_ylim(x["delta_pct"].min() - y_margin, x["delta_pct"].max() + y_margin)
+
+        # titles / labels
+        ax.set_title(MACRO_LABELS.get(macro, macro), fontsize=14)
+        ax.set_ylabel("Δ share (%)", fontsize=14)
+        ax.tick_params(labelsize=12)
+
+        # annotate only selected
+        for _, r in x.iterrows():
+            pid = int(r["pt_id"])
+            if pid not in to_label:
+                continue
+            ax.annotate(
+                str(pid),
+                (r["baseline_pct"], r["delta_pct"]),
+                fontsize=font_size,
+                xytext=(4, 4),
+                textcoords="offset points",
+                zorder=6
+            )
+
+        ax.grid(True, linestyle="--", linewidth=0.3, alpha=0.4)
+
+        # optional: small note if you want
+        # ax.text(0.01, 0.95, f"labels: top {label_top_n} |Δ| + highlights", transform=ax.transAxes,
+        #         ha="left", va="top", fontsize=10)
+
+    axes[-1].set_xlabel(f"Baseline in {year0} (% of municipality area)", fontsize=14)
+
+    plt.subplots_adjust(hspace=0.32)
+    plt.savefig(outpath, dpi=300)
+    plt.close()
+
+fig6_scatter_three_vertical_panels(
+    df,
+    MUNI_SHP,
+    macros=["agriculture", "residential_services", "natural_green"],
+    year0=1950,
+    year1=2000,
+    outpath=FIGDIR / "Fig6_Three_vertical_scatter_panels.png",
+    highlight_ids=[15],        # highlight Lignano (pt_id 15)
+    label_top_n=6,             # label top 6 |Δ| in each panel
+    label_extreme_baseline_n=2 # optionally label 2 highest-baseline points
+)
+
+
+#Extras, Separated pannels
 def fig_scatter_baseline_vs_delta_with_ids(
     df_in: pd.DataFrame,
     muni_shp: Path,
@@ -748,7 +883,7 @@ tbl_ag = fig_scatter_baseline_vs_delta_with_ids(
     "agriculture",
     1950,
     2000,
-    FIGDIR / "Fig6_Agriculture_baseline_share_vs_change_municipality_normalized.png",
+    FIGDIR / "Fig6_1_Agriculture_baseline_share_vs_change_municipality_normalized.png",
     annotate_all=True,
 )
 tbl_ag.to_csv(FIGDIR / "Scatter_ID_table_agriculture.csv", index=False)
@@ -759,7 +894,7 @@ tbl_rs = fig_scatter_baseline_vs_delta_with_ids(
     "residential_services",
     1950,
     2000,
-    FIGDIR / "Fig7_Residential_baseline_share_vs_change_municipality_normalized.png",
+    FIGDIR / "Fig6_2_Residential_baseline_share_vs_change_municipality_normalized.png",
     annotate_all=True,
 )
 tbl_rs.to_csv(FIGDIR / "Scatter_ID_table_residential_services.csv", index=False)
@@ -770,14 +905,14 @@ tbl_ng = fig_scatter_baseline_vs_delta_with_ids(
     "natural_green",
     1950,
     2000,
-    FIGDIR / "Fig8_Natural_Green_baseline_share_vs_change_municipality_normalized.png",
+    FIGDIR / "Fig6_3_Natural_Green_baseline_share_vs_change_municipality_normalized.png",
     annotate_all=True,
 )
 tbl_ng.to_csv(FIGDIR / "Scatter_ID_table_natural_green.csv", index=False)
 
 
 # ============================================================
-# FIG 9 — Exposure snapshot (two panels: 1950 vs 2000)
+# FIG 7_test — Exposure snapshot (two panels: 1950 vs 2000)
 # ============================================================
 def exposure_table(df_in: pd.DataFrame, year: int) -> pd.DataFrame:
     d = df_in[(df_in["year"] == year) & (df_in["hazard"].isin(HAZ_ORDER))].copy()
@@ -790,7 +925,7 @@ def exposure_table(df_in: pd.DataFrame, year: int) -> pd.DataFrame:
     return wide
 
 
-def fig9_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: int, outpath: Path) -> None:
+def fig7_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: int, outpath: Path) -> None:
     wide_top = exposure_table(df_in, year_top)
     wide_bot = exposure_table(df_in, year_bottom)
 
@@ -826,18 +961,202 @@ def fig9_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: in
     plt.close()
 
 
-fig9_exposure_two_panels(
+fig7_exposure_two_panels(
     df,
     year_top=1950,
     year_bottom=2000,
-    outpath=FIGDIR / "Fig9_exposure_two_panels_1950_2000.png",
+    outpath=FIGDIR / "Fig7_test_exposure_two_panels_1950_2000.png",
+)
+
+# ============================================================
+# FIG 7-2
+# ============================================================
+def fig_exposure_boxplot_18boxes_yearpaired_hatched(
+    df_in: pd.DataFrame,
+    macros: List[str],
+    muni_shp: Path,
+    outpath: Path,
+    years: List[int] = [1950, 2000],
+    normalize_by_muni_area: bool = True,
+    showfliers: bool = False,
+):
+
+    if gpd is None:
+        raise ImportError("GeoPandas required.")
+
+    # --- municipality area (only needed if normalize=True) ---
+    muni = gpd.read_file(muni_shp)
+    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+    muni_area = get_muni_area_km2(muni)
+
+    # --- hazard colors ---
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    hazard_colors = {"HPH": default_colors[0], "MPH": default_colors[1], "LPH": default_colors[2]}
+
+    # --- year hatch styles (1950 no hatch, 2000 hatched) ---
+    year_hatch = {years[0]: "", years[1]: "///"}  # adjust hatch if you want
+
+    # --- filter data once ---
+    d = df_in[
+        (df_in["year"].isin(years)) &
+        (df_in["macro_class"].isin(macros)) &
+        (df_in["hazard"].isin(HAZ_ORDER))
+    ].copy()
+
+    if d.empty:
+        print("No data found for requested settings.")
+        return
+
+    d[MUNI_ID] = d[MUNI_ID].astype(str)
+
+    # one value per municipality per (year, macro, hazard)
+    g = (
+        d.groupby([MUNI_ID, "year", "macro_class", "hazard"], as_index=False, observed=False)["area_km2"]
+         .sum()
+         .rename(columns={"area_km2": "val"})
+    )
+
+    if normalize_by_muni_area:
+        g = g.merge(muni_area, on=MUNI_ID, how="left").dropna(subset=["muni_area_km2"])
+        g["val"] = 100.0 * g["val"] / g["muni_area_km2"]
+        ylab = "Exposed area (% of municipality area)"
+    else:
+        ylab = "Exposed area (km²)"
+
+    # --- build 18 boxes: macro -> hazard -> year(1950,2000) ---
+    data, positions = [], []
+    box_hazard, box_year = [], []   # to style boxes later
+
+    tick_pos, tick_lab = [], []
+
+    box_gap = 0.35
+    pair_gap = 0.55
+    macro_gap = 1.1
+    pos = 1.0
+
+    for macro in macros:
+        macro_start = pos
+
+        for hz in HAZ_ORDER:
+            # year pair: 1950 then 2000
+            for yr in years:
+                vals = g[(g["macro_class"] == macro) & (g["hazard"] == hz) & (g["year"] == yr)]["val"].values
+                data.append(vals)
+                positions.append(pos)
+                box_hazard.append(hz)
+                box_year.append(yr)
+                pos += box_gap
+
+            # tick at center of hazard pair
+            pair_center = (positions[-2] + positions[-1]) / 2
+            tick_pos.append(pair_center)
+            tick_lab.append(hz)
+
+            pos += pair_gap
+
+        macro_end = pos
+        pos += macro_gap
+
+    # --- plot ---
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    bp = ax.boxplot(
+        data,
+        positions=positions,
+        widths=0.22,
+        patch_artist=True,
+        showfliers=showfliers,
+    )
+
+    # style boxes: hazard color + year hatch
+    for patch, hz, yr in zip(bp["boxes"], box_hazard, box_year):
+        patch.set_facecolor(hazard_colors[hz])
+        patch.set_alpha(0.85)
+        patch.set_edgecolor("black")
+        patch.set_linewidth(0.8)
+        patch.set_hatch(year_hatch.get(yr, ""))
+
+    for median in bp["medians"]:
+        median.set_color("black")
+        median.set_linewidth(1.2)
+
+    ax.set_ylabel(ylab, fontsize=14)
+    ax.set_yscale("symlog", linthresh=0.1)
+    ax.set_ylabel("Exposed area (% of municipality, symlog scale)", fontsize=12)
+    ax.tick_params(axis="y", labelsize=12)
+
+    # x-axis: hazard labels repeated per macro
+    ax.set_xticks(tick_pos)
+    ax.set_xticklabels(tick_lab, fontsize=12)
+
+    # macro labels above each macro block (3 hazard ticks per macro)
+    n_hz = len(HAZ_ORDER)
+    for i, macro in enumerate(macros):
+        start = i * n_hz
+        end = start + n_hz
+        mc = np.mean(tick_pos[start:end])
+        ax.text(
+            mc, 1.02,
+            MACRO_LABELS.get(macro, macro),
+            transform=ax.get_xaxis_transform(),
+            ha="center", va="bottom",
+            fontsize=13
+        )
+
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.3, alpha=0.4)
+
+    # --- legends INSIDE upper-right ---
+    hazard_handles = [
+    Patch(facecolor=hazard_colors[h], edgecolor="black", label=h)
+    for h in HAZ_ORDER
+    ]
+    year_handles = [
+    Patch(facecolor="white", edgecolor="black", hatch=year_hatch[years[0]], label=str(years[0])),
+    Patch(facecolor="white", edgecolor="black", hatch=year_hatch[years[1]], label=str(years[1])),
+    ]
+
+    leg1 = ax.legend(
+        handles=hazard_handles,
+        title="Hazard",
+        loc="lower right",
+        #bbox_to_anchor=(0.98, 0.98),   # inside
+        frameon=True,
+        fontsize=12,
+        title_fontsize=12
+    )
+    ax.add_artist(leg1)
+
+    ax.legend(
+        handles=year_handles,
+        title="Year",
+        loc="upper right",
+        bbox_to_anchor=(1, 0.5),   # inside, slightly lower
+        frameon=True,
+        fontsize=12,
+        title_fontsize=12
+    )
+
+
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=300)
+    plt.close()
+
+fig_exposure_boxplot_18boxes_yearpaired_hatched(
+    df,
+    macros=["agriculture", "residential_services", "natural_green"],
+    muni_shp=MUNI_SHP,
+    outpath=FIGDIR / "Fig7_Boxplot_Exposure_18boxes_yearpaired_hatched.png",
+    years=[1950, 2000],
+    normalize_by_muni_area=False,   # set True if you prefer %
+    showfliers=True,
 )
 
 
+
 # ============================================================
-# FIG 10 — Temporal evolution of exposure (ONE plot, 9 lines)
+# FIG 8 — Temporal evolution of exposure (ONE plot, 9 lines)
 # ============================================================
-def fig10_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
+def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
     d = df_in[(df_in["hazard"].isin(HAZ_ORDER)) & (df_in["macro_class"].isin(macros))].copy()
     if d.empty:
         print("No exposure data found for requested macros/hazards.")
@@ -904,10 +1223,10 @@ def fig10_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], 
     plt.close()
 
 
-fig10_temporal_exposure_9_lines_pct(
+fig8_temporal_exposure_9_lines_pct(
     df,
     macros=["agriculture", "residential_services", "natural_green"],
-    outpath=FIGDIR / "Fig10_Temporal_evolution_exposed_area_hazard_class_pct.png",
+    outpath=FIGDIR / "Fig8_Temporal_evolution_exposed_area_hazard_class_pct.png",
 )
 
 
