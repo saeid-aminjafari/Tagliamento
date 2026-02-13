@@ -82,9 +82,6 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
     # -------------------------
     # LEGEND
     # -------------------------
-    #river_patch = mpatches.Patch(color="royalblue", label="Tagliamento River")
-    #ax.legend(handles=[river_patch], loc="upper right", fontsize=12)
-
     river_handle = mpatches.Patch(color="royalblue", label="Tagliamento River")
     muni_handle = mpatches.Patch(
     facecolor="none",

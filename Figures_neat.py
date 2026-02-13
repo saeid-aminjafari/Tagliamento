@@ -71,6 +71,17 @@ MACRO_LABELS: Dict[str, str] = {
     "other": "Other",
 }
 
+# Semantic colors (edit as you like)
+MACRO_COLORS = {
+    "water_body": "#4E79A7",                # blue
+    "natural_green": "#59A14F",             # green
+    "green_urban": "#8CD17D",               # light green
+    "agriculture": "#F28E2B",               # orange/yellow (fields)
+    "residential_services": "#E15759",      # red-ish (built-up)
+    "non_residential_industry": "#9C755F",  # brown/gray (industrial)
+    "other": "#BAB0AC",                     # gray
+}
+
 
 # -----------------------------
 # LOAD + BASIC CLEANUP
@@ -210,16 +221,18 @@ def macro_share_pct_by_year(
 
 
 # ============================================================
-# FIG 3 — Study-area land-use composition over time (TOTAL only)
+# FIG 2 — Study-area land-use composition over time (TOTAL only)
 # ============================================================
-def fig3_study_area_composition(df_in: pd.DataFrame, outpath: Path) -> None:
+def fig2_study_area_composition(df_in: pd.DataFrame, outpath: Path) -> None:
     d = df_in[df_in["hazard"] == "TOTAL"].copy()
 
     p = d.groupby(["year", "macro_class"], as_index=False, observed=False)["area_km2"].sum()
     wide = p.pivot(index="year", columns="macro_class", values="area_km2").fillna(0.0)
     wide = wide[[c for c in MACRO_ORDER if c in wide.columns]]
 
-    ax = wide.plot(kind="bar", stacked=True, figsize=(10, 6))
+    colors = [MACRO_COLORS.get(c, "#999999") for c in wide.columns]
+
+    ax = wide.plot(kind="bar", stacked=True, figsize=(10, 6), color=colors)
 
     ax.set_xlabel("Year", fontsize=12)
     ax.set_ylabel("Area (km²)", fontsize=12)
@@ -235,13 +248,13 @@ def fig3_study_area_composition(df_in: pd.DataFrame, outpath: Path) -> None:
 
 
 
-fig3_study_area_composition(df, FIGDIR / "Fig3_Land_use_composition_over_time.png")
+fig2_study_area_composition(df, FIGDIR / "Fig2_Land_use_composition_over_time.png")
 
 
 # ============================================================
-# FIG 3b — Boxplots across ALL municipalities (TOTAL), NORMALIZED
+# FIG 3 — Boxplots across ALL municipalities (TOTAL), NORMALIZED
 # ============================================================
-def fig3b_boxplot_all_macros_one_fig_pct(
+def fig3_boxplot_all_macros_one_fig_pct(
     df_in: pd.DataFrame,
     macros: List[str],
     muni_shp: Path,
@@ -276,8 +289,7 @@ def fig3b_boxplot_all_macros_one_fig_pct(
     macros = [m for m in macros if m in g["macro_class"].unique()]
 
     # consistent colors (same order as stacked bars)
-    default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    macro_colors = {m: default_colors[i % len(default_colors)] for i, m in enumerate(macros)}
+    macro_colors = {m: MACRO_COLORS.get(m, "#999999") for m in macros}
 
     data, positions, box_colors = [], [], []
     group_gap = 1.5
@@ -345,11 +357,11 @@ macros6 = [
     "water_body",
 ]
 
-fig3b_boxplot_all_macros_one_fig_pct(
+fig3_boxplot_all_macros_one_fig_pct(
     df,
     macros6,
     muni_shp=MUNI_SHP,
-    outpath=FIGDIR / "Fig3b_Distribution_across_municipalities_macroclass_year_normalized.png",
+    outpath=FIGDIR / "Fig3_Distribution_across_municipalities_macroclass_year_normalized.png",
 )
 
 
@@ -467,105 +479,8 @@ fig4_delta_grid_pct(
     outpath=FIGDIR / "Fig4_Municipality_level_landuse_change_share.png",
 )
 
-
 # ============================================================
-# EXTRA FIG — Scatter: baseline share (%) vs Δ share (%) by municipality
-# ============================================================
-def fig_scatter_baseline_vs_delta_with_ids(
-    df_in: pd.DataFrame,
-    muni_shp: Path,
-    macro: str,
-    year0: int,
-    year1: int,
-    outpath: Path,
-    annotate_all: bool = True,
-    font_size: int = 12,
-) -> pd.DataFrame:
-    """
-    Scatter: x = baseline share (%) in year0, y = Δ share (%) year0→year1 (pp),
-    per municipality. Each point gets a numeric ID (pt_id).
-    Returns a table mapping pt_id -> municipality + values.
-    """
-    if gpd is None:
-        print("GeoPandas not available -> skipping scatter.")
-        return pd.DataFrame()
-
-    muni = gpd.read_file(muni_shp)
-    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
-
-    muni_area = get_muni_area_km2(muni)
-    muni_ids = make_muni_id_table(muni)
-
-    base = macro_share_pct_by_year(df_in, year0, macro, muni_area).rename(columns={"share_pct": "baseline_pct"})
-    end = macro_share_pct_by_year(df_in, year1, macro, muni_area).rename(columns={"share_pct": "end_pct"})
-
-    x = base.merge(end, on=MUNI_ID, how="outer").fillna(0.0)
-    x["delta_pct"] = x["end_pct"] - x["baseline_pct"]
-
-    x = muni_ids.merge(x, on=MUNI_ID, how="left").fillna(
-        {"baseline_pct": 0.0, "end_pct": 0.0, "delta_pct": 0.0}
-    )
-
-    fig, ax = plt.subplots(figsize=(8, 7))
-    ax.scatter(x["baseline_pct"], x["delta_pct"])
-    ax.axhline(0, linewidth=0.8)
-
-    ax.set_xlabel(f"Baseline in {year0} (% of municipality area)")
-    ax.set_ylabel(f"Δ share {year0}→{year1} (%)")
-
-    if annotate_all:
-        for _, r in x.iterrows():
-            ax.annotate(
-                str(int(r["pt_id"])),
-                (r["baseline_pct"], r["delta_pct"]),
-                fontsize=font_size,
-                xytext=(3, 3),
-                textcoords="offset points",
-            )
-
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=300)
-    plt.close()
-
-    return x[["pt_id", MUNI_ID, MUNI_NAME, "baseline_pct", "delta_pct"]].sort_values("pt_id")
-
-
-tbl_ag = fig_scatter_baseline_vs_delta_with_ids(
-    df,
-    MUNI_SHP,
-    "agriculture",
-    1950,
-    2000,
-    FIGDIR / "Fig_Agriculture_baseline_share_vs_change_municipality_normalized.png",
-    annotate_all=True,
-)
-tbl_ag.to_csv(FIGDIR / "Scatter_ID_table_agriculture.csv", index=False)
-
-tbl_rs = fig_scatter_baseline_vs_delta_with_ids(
-    df,
-    MUNI_SHP,
-    "residential_services",
-    1950,
-    2000,
-    FIGDIR / "Fig_Residential_baseline_share_vs_change_municipality_normalized.png",
-    annotate_all=True,
-)
-tbl_rs.to_csv(FIGDIR / "Scatter_ID_table_residential_services.csv", index=False)
-
-tbl_ng = fig_scatter_baseline_vs_delta_with_ids(
-    df,
-    MUNI_SHP,
-    "natural_green",
-    1950,
-    2000,
-    FIGDIR / "Fig_Natural_Green_baseline_share_vs_change_municipality_normalized.png",
-    annotate_all=True,
-)
-tbl_ng.to_csv(FIGDIR / "Scatter_ID_table_natural_green.csv", index=False)
-
-
-# ============================================================
-# COMPACT PANEL — Baseline(1950), Baseline(2000), and Δ(1950→2000)
+# Fig 5, COMPACT PANEL — Baseline(1950), Baseline(2000), and Δ(1950→2000)
 # for macros (rows) × 3 cols (1950 share, 2000 share, delta)
 # ============================================================
 def fig_panel_baseline_baseline_delta_pct(
@@ -741,13 +656,109 @@ fig_panel_baseline_baseline_delta_pct(
     macros=["agriculture", "residential_services", "natural_green"],
     year0=1950,
     year1=2000,
-    outpath=FIGDIR / "Fig_Baseline and long-term change municipality-normalized.png",
+    outpath=FIGDIR / "Fig5_Baseline and long-term change municipality-normalized.png",
     zero_tol=0.01,
 )
 
 
 # ============================================================
-# FIG 5 — Exposure snapshot (two panels: 1950 vs 2000)
+# EXTRA FIG (6,7,8) — Scatter: baseline share (%) vs Δ share (%) by municipality
+# ============================================================
+def fig_scatter_baseline_vs_delta_with_ids(
+    df_in: pd.DataFrame,
+    muni_shp: Path,
+    macro: str,
+    year0: int,
+    year1: int,
+    outpath: Path,
+    annotate_all: bool = True,
+    font_size: int = 12,
+) -> pd.DataFrame:
+    """
+    Scatter: x = baseline share (%) in year0, y = Δ share (%) year0→year1 (pp),
+    per municipality. Each point gets a numeric ID (pt_id).
+    Returns a table mapping pt_id -> municipality + values.
+    """
+    if gpd is None:
+        print("GeoPandas not available -> skipping scatter.")
+        return pd.DataFrame()
+
+    muni = gpd.read_file(muni_shp)
+    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+
+    muni_area = get_muni_area_km2(muni)
+    muni_ids = make_muni_id_table(muni)
+
+    base = macro_share_pct_by_year(df_in, year0, macro, muni_area).rename(columns={"share_pct": "baseline_pct"})
+    end = macro_share_pct_by_year(df_in, year1, macro, muni_area).rename(columns={"share_pct": "end_pct"})
+
+    x = base.merge(end, on=MUNI_ID, how="outer").fillna(0.0)
+    x["delta_pct"] = x["end_pct"] - x["baseline_pct"]
+
+    x = muni_ids.merge(x, on=MUNI_ID, how="left").fillna(
+        {"baseline_pct": 0.0, "end_pct": 0.0, "delta_pct": 0.0}
+    )
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    ax.scatter(x["baseline_pct"], x["delta_pct"])
+    ax.axhline(0, linewidth=0.8)
+
+    ax.set_xlabel(f"Baseline in {year0} (% of municipality area)")
+    ax.set_ylabel(f"Δ share {year0}→{year1} (%)")
+
+    if annotate_all:
+        for _, r in x.iterrows():
+            ax.annotate(
+                str(int(r["pt_id"])),
+                (r["baseline_pct"], r["delta_pct"]),
+                fontsize=font_size,
+                xytext=(3, 3),
+                textcoords="offset points",
+            )
+
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=300)
+    plt.close()
+
+    return x[["pt_id", MUNI_ID, MUNI_NAME, "baseline_pct", "delta_pct"]].sort_values("pt_id")
+
+
+tbl_ag = fig_scatter_baseline_vs_delta_with_ids(
+    df,
+    MUNI_SHP,
+    "agriculture",
+    1950,
+    2000,
+    FIGDIR / "Fig6_Agriculture_baseline_share_vs_change_municipality_normalized.png",
+    annotate_all=True,
+)
+tbl_ag.to_csv(FIGDIR / "Scatter_ID_table_agriculture.csv", index=False)
+
+tbl_rs = fig_scatter_baseline_vs_delta_with_ids(
+    df,
+    MUNI_SHP,
+    "residential_services",
+    1950,
+    2000,
+    FIGDIR / "Fig7_Residential_baseline_share_vs_change_municipality_normalized.png",
+    annotate_all=True,
+)
+tbl_rs.to_csv(FIGDIR / "Scatter_ID_table_residential_services.csv", index=False)
+
+tbl_ng = fig_scatter_baseline_vs_delta_with_ids(
+    df,
+    MUNI_SHP,
+    "natural_green",
+    1950,
+    2000,
+    FIGDIR / "Fig8_Natural_Green_baseline_share_vs_change_municipality_normalized.png",
+    annotate_all=True,
+)
+tbl_ng.to_csv(FIGDIR / "Scatter_ID_table_natural_green.csv", index=False)
+
+
+# ============================================================
+# FIG 9 — Exposure snapshot (two panels: 1950 vs 2000)
 # ============================================================
 def exposure_table(df_in: pd.DataFrame, year: int) -> pd.DataFrame:
     d = df_in[(df_in["year"] == year) & (df_in["hazard"].isin(HAZ_ORDER))].copy()
@@ -760,7 +771,7 @@ def exposure_table(df_in: pd.DataFrame, year: int) -> pd.DataFrame:
     return wide
 
 
-def fig5_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: int, outpath: Path) -> None:
+def fig9_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: int, outpath: Path) -> None:
     wide_top = exposure_table(df_in, year_top)
     wide_bot = exposure_table(df_in, year_bottom)
 
@@ -796,18 +807,18 @@ def fig5_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: in
     plt.close()
 
 
-fig5_exposure_two_panels(
+fig9_exposure_two_panels(
     df,
     year_top=1950,
     year_bottom=2000,
-    outpath=FIGDIR / "Fig5_exposure_two_panels_1950_2000.png",
+    outpath=FIGDIR / "Fig9_exposure_two_panels_1950_2000.png",
 )
 
 
 # ============================================================
-# FIG 6 — Temporal evolution of exposure (ONE plot, 9 lines)
+# FIG 10 — Temporal evolution of exposure (ONE plot, 9 lines)
 # ============================================================
-def fig6_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
+def fig10_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
     d = df_in[(df_in["hazard"].isin(HAZ_ORDER)) & (df_in["macro_class"].isin(macros))].copy()
     if d.empty:
         print("No exposure data found for requested macros/hazards.")
@@ -874,10 +885,10 @@ def fig6_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], o
     plt.close()
 
 
-fig6_temporal_exposure_9_lines_pct(
+fig10_temporal_exposure_9_lines_pct(
     df,
     macros=["residential_services", "agriculture", "non_residential_industry"],
-    outpath=FIGDIR / "Fig6_Temporal_evolution_exposed_area_hazard_class_pct.png",
+    outpath=FIGDIR / "Fig10_Temporal_evolution_exposed_area_hazard_class_pct.png",
 )
 
 
