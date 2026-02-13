@@ -912,7 +912,7 @@ tbl_ng.to_csv(FIGDIR / "Scatter_ID_table_natural_green.csv", index=False)
 
 
 # ============================================================
-# FIG 7_test — Exposure snapshot (two panels: 1950 vs 2000)
+# FIG 7 — Exposure snapshot (two panels: 1950 vs 2000)
 # ============================================================
 def exposure_table(df_in: pd.DataFrame, year: int) -> pd.DataFrame:
     d = df_in[(df_in["year"] == year) & (df_in["hazard"].isin(HAZ_ORDER))].copy()
@@ -965,11 +965,11 @@ fig7_exposure_two_panels(
     df,
     year_top=1950,
     year_bottom=2000,
-    outpath=FIGDIR / "Fig7_test_exposure_two_panels_1950_2000.png",
+    outpath=FIGDIR / "Fig7_exposure_two_panels_1950_2000.png",
 )
 
 # ============================================================
-# FIG 7-2
+# FIG 8
 # ============================================================
 def fig_exposure_boxplot_18boxes_yearpaired_hatched(
     df_in: pd.DataFrame,
@@ -1145,7 +1145,7 @@ fig_exposure_boxplot_18boxes_yearpaired_hatched(
     df,
     macros=["agriculture", "residential_services", "natural_green"],
     muni_shp=MUNI_SHP,
-    outpath=FIGDIR / "Fig7_Boxplot_Exposure_18boxes_yearpaired_hatched.png",
+    outpath=FIGDIR / "Fig8_Boxplot_Exposure_18boxes_yearpaired_hatched.png",
     years=[1950, 2000],
     normalize_by_muni_area=False,   # set True if you prefer %
     showfliers=True,
@@ -1154,7 +1154,7 @@ fig_exposure_boxplot_18boxes_yearpaired_hatched(
 
 
 # ============================================================
-# FIG 8 — Temporal evolution of exposure (ONE plot, 9 lines)
+# FIG 9 — Temporal evolution of exposure (ONE plot, 9 lines)
 # ============================================================
 def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
     d = df_in[(df_in["hazard"].isin(HAZ_ORDER)) & (df_in["macro_class"].isin(macros))].copy()
@@ -1226,7 +1226,7 @@ def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], o
 fig8_temporal_exposure_9_lines_pct(
     df,
     macros=["agriculture", "residential_services", "natural_green"],
-    outpath=FIGDIR / "Fig8_Temporal_evolution_exposed_area_hazard_class_pct.png",
+    outpath=FIGDIR / "Fig9_Temporal_evolution_exposed_area_hazard_class_pct.png",
 )
 
 
