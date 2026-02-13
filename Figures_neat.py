@@ -219,6 +219,20 @@ def macro_share_pct_by_year(
     out["share_pct"] = 100.0 * out["area_km2"] / out["muni_area_km2"]
     return out[[MUNI_ID, "share_pct"]]
 
+macros6 = [
+    "agriculture",
+    "natural_green",
+    "non_residential_industry",
+    "residential_services",
+    "green_urban",
+]
+macros6 = [
+    "agriculture",
+    "natural_green",
+    "non_residential_industry",
+    "residential_services",
+    "green_urban",
+]
 
 # ============================================================
 # FIG 2 — Study-area land-use composition over time (TOTAL only)
@@ -228,16 +242,17 @@ def fig2_study_area_composition(df_in: pd.DataFrame, outpath: Path) -> None:
 
     p = d.groupby(["year", "macro_class"], as_index=False, observed=False)["area_km2"].sum()
     wide = p.pivot(index="year", columns="macro_class", values="area_km2").fillna(0.0)
-    wide = wide[[c for c in MACRO_ORDER if c in wide.columns]]
+
+    # ✅ only keep macros6 (in that order)
+    wide = wide[[c for c in macros6 if c in wide.columns]]
 
     colors = [MACRO_COLORS.get(c, "#999999") for c in wide.columns]
-
     ax = wide.plot(kind="bar", stacked=True, figsize=(10, 6), color=colors)
 
     ax.set_xlabel("Year", fontsize=12)
     ax.set_ylabel("Area (km²)", fontsize=12)
 
-    # Make legend match other figures (pretty names + correct order)
+    # legend labels consistent with other figures
     handles, labels = ax.get_legend_handles_labels()
     labels_pretty = [MACRO_LABELS.get(lbl, lbl) for lbl in labels]
     ax.legend(handles, labels_pretty, bbox_to_anchor=(1.02, 1), loc="upper left")
@@ -245,7 +260,6 @@ def fig2_study_area_composition(df_in: pd.DataFrame, outpath: Path) -> None:
     plt.tight_layout()
     plt.savefig(outpath, dpi=300)
     plt.close()
-
 
 
 fig2_study_area_composition(df, FIGDIR / "Fig2_Land_use_composition_over_time.png")
@@ -347,16 +361,6 @@ def fig3_boxplot_all_macros_one_fig_pct(
         plt.savefig(outpath, dpi=300)
         plt.close()
 
-
-macros6 = [
-    "agriculture",
-    "natural_green",
-    "non_residential_industry",
-    "residential_services",
-    "green_urban",
-    "water_body",
-]
-
 fig3_boxplot_all_macros_one_fig_pct(
     df,
     macros6,
@@ -407,7 +411,10 @@ def fig4_delta_grid_pct(
 
     nrows, ncols = len(macros), len(intervals)
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3.2 * nrows))
-    plt.subplots_adjust(wspace=0.05, hspace=0.05)
+
+    # Remove left whitespace and tighten grid
+    plt.subplots_adjust(left=0.08, right=0.92, top=0.96, bottom=0.04, wspace=0.02, hspace=0.02)
+
 
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
@@ -444,32 +451,44 @@ def fig4_delta_grid_pct(
             ax.set_axis_off()
 
             if i == 0:
-                ax.set_title(f"{y0}–{y1}", fontsize=14)
+                ax.set_title(f"{y0}–{y1}", fontsize=20)
 
+            # Row labels (macro labels) — use text, NOT set_ylabel (axis is off)
             if j == 0:
                 ax.text(
-                    0.01,
-                    0.5,
-                    MACRO_LABELS.get(macro, macro),
-                    transform=ax.transAxes,
-                    va="center",
-                    ha="left",
-                    rotation=90,
-                    fontsize=14,
+                -0.05, 0.5,  # slightly outside the left edge of the first column
+                MACRO_LABELS.get(macro, macro),
+                transform=ax.transAxes,
+                va="center", ha="right",
+                rotation=90,
+                fontsize=18
                 )
 
-    sm = plt.cm.ScalarMappable(cmap=plt.get_cmap(), norm=plt.Normalize(vmin=vmin, vmax=vmax))
+    # --------------------------------------------------
+    # Colorbar on RIGHT side of grid
+    # --------------------------------------------------
+    # Reserve a bit more room on the right for the colorbar
+    plt.subplots_adjust(left=0.08, right=0.88, top=0.96, bottom=0.04, wspace=0.02, hspace=0.02)
+
+    cax = fig.add_axes([0.90, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+
+    sm = plt.cm.ScalarMappable(
+    cmap=plt.get_cmap(),
+    norm=plt.Normalize(vmin=vmin, vmax=vmax)
+    )
     sm._A = []
-    cbar = fig.colorbar(sm, ax=axes.ravel().tolist(), shrink=0.85, pad=0.02)
-    cbar.set_label("Δ share of municipality area (%)", fontsize=14)
-    cbar.ax.tick_params(labelsize=14)
+
+    cbar = fig.colorbar(sm, cax=cax)
+    cbar.set_label("Δ share of municipality area (%)", fontsize=20)
+    cbar.ax.tick_params(labelsize=20)
+
 
     plt.tight_layout()
     plt.savefig(outpath, dpi=300)
     plt.close()
 
 
-intervals_4 = [(1950, 1970), (1970, 1980), (1980, 2000), (1950, 2000)]
+intervals_4 = [(1950, 1970), (1970, 1980), (1980, 2000)] #, (1950, 2000)
 
 fig4_delta_grid_pct(
     df,
@@ -599,7 +618,7 @@ def fig_panel_baseline_baseline_delta_pct(
             ax.set_axis_off()
 
             if i == 0:
-                ax.set_title(col_titles[j], fontsize=14)
+                ax.set_title(col_titles[j], fontsize=20)
 
             if j == 0:
                 ax.text(
@@ -610,7 +629,7 @@ def fig_panel_baseline_baseline_delta_pct(
                     va="center",
                     ha="left",
                     rotation=90,
-                    fontsize=14,
+                    fontsize=18,
                 )
 
     # ---- Colorbars aligned with SECOND ROW (same as your original intent) ----
@@ -638,13 +657,13 @@ def fig_panel_baseline_baseline_delta_pct(
 
     cax1 = fig.add_axes([cbar_x, y0, cbar_w, h])
     cbar1 = fig.colorbar(sm_base, cax=cax1)
-    cbar1.set_label("Share of municipality area (%)", fontsize=14)
-    cbar1.ax.tick_params(labelsize=14)
+    cbar1.set_label("Share of municipality area (%)", fontsize=20)
+    cbar1.ax.tick_params(labelsize=20)
 
     cax2 = fig.add_axes([bbox_col3.x1 + 0.015, y0, 0.018, h])
     cbar2 = fig.colorbar(sm_delta, cax=cax2)
-    cbar2.set_label("Δ share (%)", fontsize=14)
-    cbar2.ax.tick_params(labelsize=14)
+    cbar2.set_label("Δ share (%)", fontsize=20)
+    cbar2.ax.tick_params(labelsize=20)
 
     plt.savefig(outpath, dpi=300)
     plt.close()
@@ -766,7 +785,7 @@ def exposure_table(df_in: pd.DataFrame, year: int) -> pd.DataFrame:
     p = d.groupby(["macro_class", "hazard"], as_index=False, observed=False)["area_km2"].sum()
 
     wide = p.pivot(index="macro_class", columns="hazard", values="area_km2").fillna(0.0)
-    wide = wide.reindex([c for c in MACRO_ORDER if c in wide.index])
+    wide = wide.reindex([c for c in macros6 if c in wide.index])
     wide = wide[[h for h in HAZ_ORDER if h in wide.columns]]
     return wide
 
@@ -838,8 +857,8 @@ def fig10_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], 
 
     macro_labels_local = {
         "agriculture": MACRO_LABELS["agriculture"],
-        "non_residential_industry": MACRO_LABELS["non_residential_industry"],
         "residential_services": MACRO_LABELS["residential_services"],
+        "natural_green": MACRO_LABELS["natural_green"],
     }
 
     default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -848,7 +867,7 @@ def fig10_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], 
     macro_style = {
         "residential_services": "-",
         "agriculture": "--",
-        "non_residential_industry": ":",
+        "natural_green": ":",
     }
 
     years = sorted(p["year"].unique())
@@ -887,7 +906,7 @@ def fig10_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], 
 
 fig10_temporal_exposure_9_lines_pct(
     df,
-    macros=["residential_services", "agriculture", "non_residential_industry"],
+    macros=["agriculture", "residential_services", "natural_green"],
     outpath=FIGDIR / "Fig10_Temporal_evolution_exposed_area_hazard_class_pct.png",
 )
 
