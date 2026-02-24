@@ -7,7 +7,7 @@ __pycache__/
 venv/
 .env/
 .ipynb_checkpoints/
-/outputs/tagliamento_intermediate.gpkg
+outputs/
 raw/
 test/
 .vscode/
