@@ -12,6 +12,7 @@ OUT = BASE / "outputs"
 OUT.mkdir(exist_ok=True)
 RAW = BASE / "raw"
 RAW.mkdir(exist_ok=True)
+ID_CSV = OUT / "Municipality_ID_table_pt_id.csv"
 
 FIGDIR = OUT / "figures"
 FIGDIR.mkdir(parents=True, exist_ok=True)
@@ -21,19 +22,6 @@ out_png = FIGDIR / "Fig1_Tagliamento_overview_map.png"
 MUNI_SHP  = RAW / "COMUNI_TAGLIAMENTO.shp"
 RIVER_SHP = RAW / "TAGLIAMENTO_RIVER.shp"
 ITALY_SHP = RAW / "it.shp"
-
-
-def make_muni_id_table(muni_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
-    """
-    Stable municipality ID mapping (consistent with your other figures):
-    - sort by PRO_COM (as string)
-    - assign pt_id = 1..N
-    """
-    t = muni_gdf[["PRO_COM", "COMUNE"]].copy()
-    t["PRO_COM"] = t["PRO_COM"].astype(str)
-    t = t.drop_duplicates(subset=["PRO_COM"]).sort_values("PRO_COM").reset_index(drop=True)
-    t["pt_id"] = range(1, len(t) + 1)
-    return t
 
 
 def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
@@ -145,13 +133,9 @@ def fig_tagliamento_overview(id_table: pd.DataFrame, outpath: Path) -> None:
 
 
 # -------------------------
-# BUILD ID TABLE (consistent with your other figures)
+# LOAD ID TABLE (use same IDs everywhere)
 # -------------------------
-muni_for_ids = gpd.read_file(MUNI_SHP)
-id_table = make_muni_id_table(muni_for_ids)
-
-# (Optional) save mapping for reference
-id_table.to_csv(OUT / "Municipality_ID_table_pt_id.csv", index=False)
+id_table = pd.read_csv(ID_CSV, dtype={"PRO_COM": str})
 
 # -------------------------
 # CALL
