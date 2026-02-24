@@ -11,4 +11,4 @@ raw/
 test/
 .vscode/
 *.qgz
-output/
+outputs/
