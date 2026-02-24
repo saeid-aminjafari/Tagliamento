@@ -85,39 +85,6 @@ MACRO_COLORS = {
     "unclassified": "#BAB0AC",                     # gray
 }
 
-
-# -----------------------------
-# LOAD + BASIC CLEANUP
-# -----------------------------
-df = pd.read_csv(LONG_CSV)
-
-df["year"] = df["year"].astype(int)
-df["area_km2"] = pd.to_numeric(df["area_km2"], errors="coerce").fillna(0.0)
-
-# Keep consistent category ordering
-df["macro_class"] = pd.Categorical(df["macro_class"], categories=MACRO_ORDER, ordered=True)
-df["hazard"] = df["hazard"].astype(str)
-
-# Keep muni IDs consistent everywhere
-if MUNI_ID in df.columns:
-    df[MUNI_ID] = df[MUNI_ID].astype(str)
-
-# --- total area per year across ALL macro classes (TOTAL only) ---
-tot_all = (
-    df[df["hazard"] == "TOTAL"]
-    .groupby(["year"], as_index=False)["area_km2"]
-    .sum()
-    .rename(columns={"area_km2": "sum_all_macros_km2"})
-)
-macros6 = [
-    "agriculture",
-    "natural_green",
-    "non_residential_industry",
-    "residential",
-    "services_infrastructure",
-    "green_urban",
-]
-
 # ============================================================
 # HELPERS
 # ============================================================
@@ -128,14 +95,46 @@ def require_geopandas() -> None:
 
 def make_muni_id_table(muni_gdf: "gpd.GeoDataFrame") -> pd.DataFrame:
     """
-    Create a stable label for each municipality to use across plots/maps.
-    label = short integer 1..N (sorted by PRO_COM)
+    Stable municipality labels 1..N ordered North -> South (by latitude).
+    Uses representative_point() (always inside polygon) and sorts by Y descending.
+    Tie-breaker: X ascending, then PRO_COM to keep deterministic.
     """
-    t = muni_gdf[[MUNI_ID, MUNI_NAME]].copy()
-    t[MUNI_ID] = t[MUNI_ID].astype(str)
-    t = t.drop_duplicates(subset=[MUNI_ID]).sort_values(MUNI_ID).reset_index(drop=True)
-    t["pt_id"] = np.arange(1, len(t) + 1)
-    return t
+    require_geopandas()
+
+    m = muni_gdf[[MUNI_ID, MUNI_NAME, "geometry"]].copy()
+    m[MUNI_ID] = m[MUNI_ID].astype(str)
+    m = m.drop_duplicates(subset=[MUNI_ID]).copy()
+
+    # Ensure a projected CRS for robust representative points (and consistent units)
+    if m.crs is None:
+        raise ValueError("Municipality layer has no CRS. Define it in QGIS, then rerun.")
+    m = m.to_crs(CRS_CANON)
+
+    rp = m.representative_point()
+    m["_x"] = rp.x
+    m["_y"] = rp.y
+
+    # North -> South: higher Y first
+    m = m.sort_values(by=["_y", "_x", MUNI_ID], ascending=[False, True, True]).reset_index(drop=True)
+
+    out = m[[MUNI_ID, MUNI_NAME]].copy()
+    out["pt_id"] = np.arange(1, len(out) + 1)
+
+    return out
+
+# Build ID table (North -> South)
+muni_for_ids = gpd.read_file(MUNI_SHP)
+id_table = make_muni_id_table(muni_for_ids)
+
+# Ensure consistent types
+id_table[MUNI_ID] = id_table[MUNI_ID].astype(str)
+id_table["pt_id"] = id_table["pt_id"].astype(int)
+
+# Save permanently
+ID_CSV = OUT / "Municipality_ID_table_pt_id.csv"
+id_table.to_csv(ID_CSV, index=False)
+
+print("Saved ID table to:", ID_CSV)
 
 
 def add_muni_ids_to_axes(
@@ -157,21 +156,19 @@ def add_muni_ids_to_axes(
 
 def get_muni_area_km2(muni_gdf: "gpd.GeoDataFrame") -> pd.DataFrame:
     """
-    Return DataFrame with municipality area in km²:
-    - from 'Area_kmq' attribute if present, else computed from geometry (after projecting).
+    Return DataFrame with municipality area in km² computed from geometry (recommended).
+    We do NOT trust Area_kmq because it is often rounded / inconsistent.
     """
     muni = muni_gdf.copy()
     muni[MUNI_ID] = muni[MUNI_ID].astype(str)
 
-    if "Area_kmq" in muni.columns:
-        a = muni[[MUNI_ID, "Area_kmq"]].rename(columns={"Area_kmq": "muni_area_km2"}).copy()
-        a["muni_area_km2"] = pd.to_numeric(a["muni_area_km2"], errors="coerce")
-    else:
-        if muni.crs is None:
-            raise ValueError("Municipality layer has no CRS. Define it in QGIS, then rerun.")
-        muni = muni.to_crs(CRS_CANON)
-        a = muni[[MUNI_ID]].copy()
-        a["muni_area_km2"] = muni.geometry.area / 1_000_000.0
+    if muni.crs is None:
+        raise ValueError("Municipality layer has no CRS. Define it in QGIS, then rerun.")
+
+    muni = muni.to_crs(CRS_CANON)
+
+    a = muni[[MUNI_ID]].copy()
+    a["muni_area_km2"] = muni.geometry.area / 1_000_000.0
 
     a = a.dropna(subset=["muni_area_km2"]).drop_duplicates(subset=[MUNI_ID])
     return a
@@ -236,6 +233,116 @@ def macro_share_pct_by_year(
     out = out.dropna(subset=["muni_area_km2"]).copy()
     out["share_pct"] = 100.0 * out["area_km2"] / out["muni_area_km2"]
     return out[[MUNI_ID, "share_pct"]]
+# -----------------------------
+# LOAD + BASIC CLEANUP
+# -----------------------------
+df = pd.read_csv(LONG_CSV)
+
+# -----------------------------
+# ADD not_mapped_2020 relative to MOLAND footprint (Option B)
+# -----------------------------
+NOT_MAPPED_LABEL = "not_mapped_2020"
+
+if NOT_MAPPED_LABEL not in MACRO_ORDER:
+    MACRO_ORDER = MACRO_ORDER + [NOT_MAPPED_LABEL]
+MACRO_LABELS[NOT_MAPPED_LABEL] = "Not mapped (2020)"
+MACRO_COLORS[NOT_MAPPED_LABEL] = "#D0D0D0"
+
+# ensure types (do this BEFORE any grouping)
+df["year"] = df["year"].astype(int)
+df["hazard"] = df["hazard"].astype(str)
+df["macro_class"] = df["macro_class"].astype(str)
+df["area_km2"] = pd.to_numeric(df["area_km2"], errors="coerce").fillna(0.0)
+df[MUNI_ID] = df[MUNI_ID].astype(str)
+
+# Load municipality names ONLY for attaching labels to synthetic rows
+require_geopandas()
+muni = gpd.read_file(MUNI_SHP)
+muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+names = muni[[MUNI_ID, MUNI_NAME]].drop_duplicates(subset=[MUNI_ID])
+
+ref_years = [1950, 1970, 1980, 2000]
+
+# 1) reference footprint per municipality = mean mapped area over ref years
+ref_footprint = (
+    df[(df["hazard"] == "TOTAL") & (df["year"].isin(ref_years))]
+    .groupby([MUNI_ID, "year"], as_index=False)["area_km2"].sum()
+    .groupby(MUNI_ID, as_index=False)["area_km2"].mean()
+    .rename(columns={"area_km2": "ref_km2"})
+)
+
+# 2) mapped 2020 per municipality
+mapped_2020 = (
+    df[(df["hazard"] == "TOTAL") & (df["year"] == 2020)]
+    .groupby(MUNI_ID, as_index=False)["area_km2"].sum()
+    .rename(columns={"area_km2": "mapped_km2"})
+)
+
+# 3) missing in 2020 relative to reference footprint (NOT municipality geometry)
+miss = ref_footprint.merge(mapped_2020, on=MUNI_ID, how="left").fillna({"mapped_km2": 0.0})
+miss["missing_km2"] = miss["ref_km2"] - miss["mapped_km2"]
+
+# clamp tiny negatives
+eps = 1e-3
+miss.loc[miss["missing_km2"].between(-eps, 0), "missing_km2"] = 0.0
+
+# hard fail only if seriously negative
+if (miss["missing_km2"] < -eps).any():
+    bad = miss.loc[miss["missing_km2"] < -eps, [MUNI_ID, "ref_km2", "mapped_km2", "missing_km2"]]
+    raise ValueError(f"Some municipalities have mapped_2020 > ref footprint.\n{bad.head(10)}")
+
+# add synthetic rows (TOTAL only)
+add = miss.loc[miss["missing_km2"] > eps, [MUNI_ID, "missing_km2"]].copy()
+if not add.empty:
+    add = add.rename(columns={"missing_km2": "area_km2"})
+    add["year"] = 2020
+    add["hazard"] = "TOTAL"
+    add["macro_class"] = NOT_MAPPED_LABEL
+    add = add.merge(names, on=MUNI_ID, how="left")  # attach COMUNE (optional)
+    df = pd.concat([df, add[[MUNI_ID, MUNI_NAME, "year", "hazard", "macro_class", "area_km2"]]], ignore_index=True)
+
+# apply categorical ordering AFTER adding synthetic rows
+df["macro_class"] = pd.Categorical(df["macro_class"], categories=MACRO_ORDER, ordered=True)
+
+# quick print check
+tot_ref = (
+    df[(df["hazard"] == "TOTAL") & (df["year"].isin(ref_years))]
+    .groupby("year")["area_km2"].sum()
+)
+tot_2020 = (
+    df[(df["hazard"] == "TOTAL") & (df["year"] == 2020)]
+    .groupby("year")["area_km2"].sum()
+)
+print("TOTAL area check (km2):")
+print(pd.concat([tot_ref, tot_2020]).to_string())
+
+
+df["year"] = df["year"].astype(int)
+df["area_km2"] = pd.to_numeric(df["area_km2"], errors="coerce").fillna(0.0)
+
+# Keep consistent category ordering
+df["macro_class"] = pd.Categorical(df["macro_class"], categories=MACRO_ORDER, ordered=True)
+df["hazard"] = df["hazard"].astype(str)
+
+# Keep muni IDs consistent everywhere
+if MUNI_ID in df.columns:
+    df[MUNI_ID] = df[MUNI_ID].astype(str)
+
+# --- total area per year across ALL macro classes (TOTAL only) ---
+tot_all = (
+    df[df["hazard"] == "TOTAL"]
+    .groupby(["year"], as_index=False)["area_km2"]
+    .sum()
+    .rename(columns={"area_km2": "sum_all_macros_km2"})
+)
+macros6 = [
+    "agriculture",
+    "natural_green",
+    "non_residential_industry",
+    "residential",
+    "services_infrastructure",
+    "green_urban",
+]
 
 # ============================================================
 # FIG 2 — Study-area land-use composition over time (TOTAL only)
@@ -243,11 +350,14 @@ def macro_share_pct_by_year(
 def fig2_study_area_composition(df_in: pd.DataFrame, outpath: Path) -> None:
     d = df_in[df_in["hazard"] == "TOTAL"].copy()
 
+
     p = d.groupby(["year", "macro_class"], as_index=False, observed=False)["area_km2"].sum()
     wide = p.pivot(index="year", columns="macro_class", values="area_km2").fillna(0.0)
 
     # ✅ only keep macros6 (in that order)
-    wide = wide[[c for c in macros6 if c in wide.columns]]
+    # Keep macros6 + the 2020 missing bucket (if present)
+    keep = macros6 + [NOT_MAPPED_LABEL]
+    wide = wide[[c for c in keep if c in wide.columns]]
 
     colors = [MACRO_COLORS.get(c, "#999999") for c in wide.columns]
     ax = wide.plot(kind="bar", stacked=True, figsize=(10, 6), color=colors)
@@ -675,7 +785,7 @@ def fig_panel_baseline_baseline_delta_pct(
 fig_panel_baseline_baseline_delta_pct(
     df_in=df,
     muni_shp=MUNI_SHP,
-    macros=["agriculture", "residential", "natural_green"],
+    macros=["agriculture", "natural_green", "residential", "services_infrastructure"],
     year0=1950,
     year1=2020,
     outpath=FIGDIR / "Fig5_Baseline and long-term change municipality-normalized.png",
@@ -694,16 +804,16 @@ def fig6_scatter_three_vertical_panels(
     year0: int,
     year1: int,
     outpath: Path,
-    highlight_ids: List[int] = [15],   # e.g., [15]
-    label_top_n: int = 10,              # label top-N |Δ| per panel
-    label_extreme_baseline_n: int = 10, # optionally label top-N baseline too
+    highlight_ids: List[int] = [41],   # e.g., [15]
+    label_top_n: int = 8,              # label top-N |Δ| per panel
+    label_extreme_baseline_n: int = 0, # optionally label top-N baseline too
     font_size: int = 12,
     point_size: int = 35,
     highlight_size: int = 90,
 ):
 
     if highlight_ids is None:
-        highlight_ids = [15]
+        highlight_ids = [41]
 
     if gpd is None:
         print("GeoPandas not available -> skipping scatter.")
@@ -810,13 +920,13 @@ def fig6_scatter_three_vertical_panels(
 fig6_scatter_three_vertical_panels(
     df,
     MUNI_SHP,
-    macros=["agriculture", "residential", "natural_green"],
+    macros=["agriculture", "natural_green", "residential", "services_infrastructure"],
     year0=1950,
     year1=2020,
     outpath=FIGDIR / "Fig6_Three_vertical_scatter_panels.png",
-    highlight_ids=[15],        # highlight Lignano (pt_id 15)
+    highlight_ids=[41],        # highlight Lignano (pt_id 15)
     label_top_n=6,             # label top 6 |Δ| in each panel
-    label_extreme_baseline_n=2 # optionally label 2 highest-baseline points
+    label_extreme_baseline_n=0 # optionally label 2 highest-baseline points
 )
 
 
@@ -1121,8 +1231,8 @@ def fig_exposure_boxplot_18boxes_yearpaired_hatched(
     leg1 = ax.legend(
         handles=hazard_handles,
         title="Hazard",
-        loc="lower right",
-        #bbox_to_anchor=(0.98, 0.98),   # inside
+        loc="best",
+        #bbox_to_anchor=(1, 0.5),   # inside
         frameon=True,
         fontsize=12,
         title_fontsize=12
@@ -1133,7 +1243,7 @@ def fig_exposure_boxplot_18boxes_yearpaired_hatched(
         handles=year_handles,
         title="Year",
         loc="upper right",
-        bbox_to_anchor=(1, 0.5),   # inside, slightly lower
+        bbox_to_anchor=(0.85, 1),   # inside, slightly lower
         frameon=True,
         fontsize=12,
         title_fontsize=12
@@ -1146,7 +1256,7 @@ def fig_exposure_boxplot_18boxes_yearpaired_hatched(
 
 fig_exposure_boxplot_18boxes_yearpaired_hatched(
     df,
-    macros=["agriculture", "residential", "natural_green"],
+    macros=["agriculture", "natural_green", "residential", "services_infrastructure"],
     muni_shp=MUNI_SHP,
     outpath=FIGDIR / "Fig8_Boxplot_Exposure_18boxes_yearpaired_hatched.png",
     years=[1950, 2020],
