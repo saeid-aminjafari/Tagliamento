@@ -11,5 +11,4 @@ raw/
 test/
 .vscode/
 *.qgz
-output/*.gpkg
-output/figures
+output/
