@@ -19,7 +19,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-from Tagliamento import CRS_CANON
+CRS_CANON = "EPSG:6708"
 
 # Optional for maps
 try:
@@ -45,18 +45,19 @@ MUNI_ID = "PRO_COM"
 MUNI_NAME = "COMUNE"
 
 YEAR0 = 1950
-YEAR1 = 2000
+YEAR1 = 2020
 
-SNAPSHOT_YEAR = 2000  # (kept; used by your workflow conceptually)
+SNAPSHOT_YEAR = 2020  # (kept; used by your workflow conceptually)
 
 MACRO_ORDER = [
     "agriculture",
     "natural_green",
     "non_residential_industry",
-    "residential_services",
+    "residential",
+    "services_infrastructure",
     "green_urban",
     "water_body",
-    "other",
+    "unclassified",
 ]
 
 HAZ_ORDER = ["HPH", "MPH", "LPH"]  # display order
@@ -65,10 +66,11 @@ MACRO_LABELS: Dict[str, str] = {
     "agriculture": "Agriculture",
     "natural_green": "Natural Green",
     "non_residential_industry": "Non-residential Industry",
-    "residential_services": "Residential/Services",
-    "green_urban": "Urban/Green",
+    "residential": "Residential",
+    "services_infrastructure": "Services/Infrastructure",
+    "green_urban": "Urban Green",
     "water_body": "Water Bodies",
-    "other": "Other",
+    "unclassified": "Unclassified",
 }
 
 # Semantic colors (edit as you like)
@@ -77,9 +79,10 @@ MACRO_COLORS = {
     "natural_green": "#59A14F",             # green
     "green_urban": "#8CD17D",               # light green
     "agriculture": "#F28E2B",               # orange/yellow (fields)
-    "residential_services": "#E15759",      # red-ish (built-up)
+    "residential": "#E15759",      # red-ish (built-up)
     "non_residential_industry": "#9C755F",  # brown/gray (industrial)
-    "other": "#BAB0AC",                     # gray
+    "services_infrastructure": "#EDC948",   # yellow (infrastructure)
+    "unclassified": "#BAB0AC",                     # gray
 }
 
 
@@ -99,6 +102,21 @@ df["hazard"] = df["hazard"].astype(str)
 if MUNI_ID in df.columns:
     df[MUNI_ID] = df[MUNI_ID].astype(str)
 
+# --- total area per year across ALL macro classes (TOTAL only) ---
+tot_all = (
+    df[df["hazard"] == "TOTAL"]
+    .groupby(["year"], as_index=False)["area_km2"]
+    .sum()
+    .rename(columns={"area_km2": "sum_all_macros_km2"})
+)
+macros6 = [
+    "agriculture",
+    "natural_green",
+    "non_residential_industry",
+    "residential",
+    "services_infrastructure",
+    "green_urban",
+]
 
 # ============================================================
 # HELPERS
@@ -218,21 +236,6 @@ def macro_share_pct_by_year(
     out = out.dropna(subset=["muni_area_km2"]).copy()
     out["share_pct"] = 100.0 * out["area_km2"] / out["muni_area_km2"]
     return out[[MUNI_ID, "share_pct"]]
-
-macros6 = [
-    "agriculture",
-    "natural_green",
-    "non_residential_industry",
-    "residential_services",
-    "green_urban",
-]
-macros6 = [
-    "agriculture",
-    "natural_green",
-    "non_residential_industry",
-    "residential_services",
-    "green_urban",
-]
 
 # ============================================================
 # FIG 2 — Study-area land-use composition over time (TOTAL only)
@@ -488,7 +491,7 @@ def fig4_delta_grid_pct(
     plt.close()
 
 
-intervals_4 = [(1950, 1970), (1970, 1980), (1980, 2000)] #, (1950, 2000)
+intervals_4 = [(1950, 1970), (1970, 1980), (1980, 2000), (2000, 2020)] #, (1950, 2020)
 
 fig4_delta_grid_pct(
     df,
@@ -672,9 +675,9 @@ def fig_panel_baseline_baseline_delta_pct(
 fig_panel_baseline_baseline_delta_pct(
     df_in=df,
     muni_shp=MUNI_SHP,
-    macros=["agriculture", "residential_services", "natural_green"],
+    macros=["agriculture", "residential", "natural_green"],
     year0=1950,
-    year1=2000,
+    year1=2020,
     outpath=FIGDIR / "Fig5_Baseline and long-term change municipality-normalized.png",
     zero_tol=0.01,
 )
@@ -807,9 +810,9 @@ def fig6_scatter_three_vertical_panels(
 fig6_scatter_three_vertical_panels(
     df,
     MUNI_SHP,
-    macros=["agriculture", "residential_services", "natural_green"],
+    macros=["agriculture", "residential", "natural_green"],
     year0=1950,
-    year1=2000,
+    year1=2020,
     outpath=FIGDIR / "Fig6_Three_vertical_scatter_panels.png",
     highlight_ids=[15],        # highlight Lignano (pt_id 15)
     label_top_n=6,             # label top 6 |Δ| in each panel
@@ -882,7 +885,7 @@ tbl_ag = fig_scatter_baseline_vs_delta_with_ids(
     MUNI_SHP,
     "agriculture",
     1950,
-    2000,
+    2020,
     FIGDIR / "Fig6_1_Agriculture_baseline_share_vs_change_municipality_normalized.png",
     annotate_all=True,
 )
@@ -891,20 +894,20 @@ tbl_ag.to_csv(FIGDIR / "Scatter_ID_table_agriculture.csv", index=False)
 tbl_rs = fig_scatter_baseline_vs_delta_with_ids(
     df,
     MUNI_SHP,
-    "residential_services",
+    "residential",
     1950,
-    2000,
+    2020,
     FIGDIR / "Fig6_2_Residential_baseline_share_vs_change_municipality_normalized.png",
     annotate_all=True,
 )
-tbl_rs.to_csv(FIGDIR / "Scatter_ID_table_residential_services.csv", index=False)
+tbl_rs.to_csv(FIGDIR / "Scatter_ID_table_residential.csv", index=False)
 
 tbl_ng = fig_scatter_baseline_vs_delta_with_ids(
     df,
     MUNI_SHP,
     "natural_green",
     1950,
-    2000,
+    2020,
     FIGDIR / "Fig6_3_Natural_Green_baseline_share_vs_change_municipality_normalized.png",
     annotate_all=True,
 )
@@ -964,8 +967,8 @@ def fig7_exposure_two_panels(df_in: pd.DataFrame, year_top: int, year_bottom: in
 fig7_exposure_two_panels(
     df,
     year_top=1950,
-    year_bottom=2000,
-    outpath=FIGDIR / "Fig7_exposure_two_panels_1950_2000.png",
+    year_bottom=2020,
+    outpath=FIGDIR / "Fig7_exposure_two_panels_1950_2020.png",
 )
 
 # ============================================================
@@ -976,7 +979,7 @@ def fig_exposure_boxplot_18boxes_yearpaired_hatched(
     macros: List[str],
     muni_shp: Path,
     outpath: Path,
-    years: List[int] = [1950, 2000],
+    years: List[int] = [1950, 2020],
     normalize_by_muni_area: bool = True,
     showfliers: bool = False,
 ):
@@ -1082,7 +1085,7 @@ def fig_exposure_boxplot_18boxes_yearpaired_hatched(
 
     ax.set_ylabel(ylab, fontsize=14)
     ax.set_yscale("symlog", linthresh=0.1)
-    ax.set_ylabel("Exposed area (% of municipality, symlog scale)", fontsize=12)
+    ax.set_ylabel(f"{ylab} (symlog scale)", fontsize=12)
     ax.tick_params(axis="y", labelsize=12)
 
     # x-axis: hazard labels repeated per macro
@@ -1143,10 +1146,10 @@ def fig_exposure_boxplot_18boxes_yearpaired_hatched(
 
 fig_exposure_boxplot_18boxes_yearpaired_hatched(
     df,
-    macros=["agriculture", "residential_services", "natural_green"],
+    macros=["agriculture", "residential", "natural_green"],
     muni_shp=MUNI_SHP,
     outpath=FIGDIR / "Fig8_Boxplot_Exposure_18boxes_yearpaired_hatched.png",
-    years=[1950, 2000],
+    years=[1950, 2020],
     normalize_by_muni_area=False,   # set True if you prefer %
     showfliers=True,
 )
@@ -1156,7 +1159,7 @@ fig_exposure_boxplot_18boxes_yearpaired_hatched(
 # ============================================================
 # FIG 9 — Temporal evolution of exposure (ONE plot, 9 lines)
 # ============================================================
-def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
+def fig9_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], outpath: Path) -> None:
     d = df_in[(df_in["hazard"].isin(HAZ_ORDER)) & (df_in["macro_class"].isin(macros))].copy()
     if d.empty:
         print("No exposure data found for requested macros/hazards.")
@@ -1176,7 +1179,7 @@ def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], o
 
     macro_labels_local = {
         "agriculture": MACRO_LABELS["agriculture"],
-        "residential_services": MACRO_LABELS["residential_services"],
+        "residential": MACRO_LABELS["residential"],
         "natural_green": MACRO_LABELS["natural_green"],
     }
 
@@ -1184,7 +1187,7 @@ def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], o
     hazard_color = {"HPH": default_colors[0], "MPH": default_colors[1], "LPH": default_colors[2]}
 
     macro_style = {
-        "residential_services": "-",
+        "residential": "-",
         "agriculture": "--",
         "natural_green": ":",
     }
@@ -1223,9 +1226,9 @@ def fig8_temporal_exposure_9_lines_pct(df_in: pd.DataFrame, macros: List[str], o
     plt.close()
 
 
-fig8_temporal_exposure_9_lines_pct(
+fig9_temporal_exposure_9_lines_pct(
     df,
-    macros=["agriculture", "residential_services", "natural_green"],
+    macros=["agriculture", "residential", "natural_green"],
     outpath=FIGDIR / "Fig9_Temporal_evolution_exposed_area_hazard_class_pct.png",
 )
 
@@ -1236,7 +1239,7 @@ fig8_temporal_exposure_9_lines_pct(
 # defined in the snippet you pasted. So this will still be skipped.
 # ============================================================
 def pick_representative_munis(df_in: pd.DataFrame, year0: int, year1: int, n: int = 4) -> list:
-    delta = compute_delta_by_muni(df_in, year0, year1, "residential_services")  # noqa: F821
+    delta = compute_delta_by_muni(df_in, year0, year1, "residential")  # noqa: F821
     top = delta.sort_values("delta_km2", ascending=False).head(n)
     return top[MUNI_ID].tolist()
 
