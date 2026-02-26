@@ -783,7 +783,7 @@ def fig3_boxplot_two_panels_pct(
             return "ns"
 
         def _panel_sig_text(macros_list: List[str]) -> str:
-            lines = ["Change significance (Friedman, FDR):\n"]
+            lines = ["Change significance (Friedman):\n"]
             for m in macros_list:
                 row = stats.loc[stats["macro_class"] == m]
                 p = row["friedman_p_fdr"].iloc[0] if len(row) else np.nan
@@ -823,8 +823,8 @@ fig3_boxplot_two_panels_pct(
     muni_shp=MUNI_SHP,
     outpath=FIGDIR / "Fig3_Distribution_across_municipalities_macroclass_year_normalized_two_panels.png",
     add_sig_summary=True,
-    bottom_ylim=(0, 14),
-    top_ylim=(0, 110),
+    bottom_ylim=(-.5, 14),
+    top_ylim=(-2, 110),
     legend_high_anchor=(0.02, 0.98),
     sig_high_anchor=(0.55, 0.98),
     legend_low_anchor=(0.02, 0.98),
