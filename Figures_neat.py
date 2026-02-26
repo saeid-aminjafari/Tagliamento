@@ -566,12 +566,18 @@ def fig3_boxplot_two_panels_pct(
     muni_shp: Path,
     outpath: Optional[Path] = None,
     add_sig_summary: bool = True,
+    # --- layout controls you asked for ---
+    legend_loc: str = "upper left",
+    legend_anchor: Tuple[float, float] = (0.02, 0.98),  # inside ax1
+    sig_anchor: Tuple[float, float] = (0.60, 0.98),     # inside ax1, right-ish
+    bottom_ylim: Optional[Tuple[float, float]] = (0.0, 15.0),  # set as you want
 ) -> None:
     """
     Fig 3: two-panel boxplots (TOTAL only), normalized by municipality area (%).
       (a) high-share macros
       (b) low-share macros
-    Optionally adds Friedman significance summary (FDR corrected across macros).
+    Legend + significance summary are placed INSIDE the top panel.
+    Bottom y-limits can be forced for readability.
     """
     macros_all = macros_high + macros_low
     g = _prep_pct_muni_area(df_in, macros_all, muni_shp)
@@ -642,15 +648,26 @@ def fig3_boxplot_two_panels_pct(
     ax1.set_ylabel("Share of municipality area (%)")
     ax2.set_ylabel("Share of municipality area (%)")
 
-    # One legend for whole figure
+    # ---- bottom panel y limits (your request) ----
+    if bottom_ylim is not None:
+        ax2.set_ylim(bottom_ylim[0], bottom_ylim[1])
+
+    # ---- legend INSIDE top panel ----
     legend_macros = macros_high + macros_low
     legend_handles = [
         Patch(facecolor=macro_colors[m], edgecolor="black", label=MACRO_LABELS.get(m, m))
         for m in legend_macros
     ]
-    ax1.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1))
+    ax1.legend(
+        handles=legend_handles,
+        loc=legend_loc,
+        bbox_to_anchor=legend_anchor,   # axes fraction
+        borderaxespad=0.0,
+        frameon=True,
+        fontsize=12
+    )
 
-    # Significance summary
+    # ---- significance summary INSIDE top panel, vertically aligned ----
     if add_sig_summary:
         stats = _friedman_by_macro(g, legend_macros)
 
@@ -661,13 +678,22 @@ def fig3_boxplot_two_panels_pct(
             if p < 0.05:  return "*"
             return "ns"
 
-        parts = []
-        for _, r in stats.iterrows():
-            label = MACRO_LABELS.get(r["macro_class"], r["macro_class"])
-            parts.append(f"{label} {stars(r['friedman_p_fdr'])}")
+        # enforce consistent order + vertical alignment
+        lines = ["Change significance (Friedman test):"]
+        for m in legend_macros:
+            row = stats.loc[stats["macro_class"] == m]
+            p = row["friedman_p_fdr"].iloc[0] if len(row) else np.nan
+            label = MACRO_LABELS.get(m, m)
+            lines.append(f"{label}: {stars(p)}")
 
-        txt = "Across-year change (Friedman, FDR-corrected): " + "; ".join(parts)
-        ax2.text(0.0, -0.28, txt, transform=ax2.transAxes, fontsize=10, va="top")
+        ax1.text(
+            sig_anchor[0], sig_anchor[1],
+            "\n".join(lines),
+            transform=ax1.transAxes,
+            ha="left", va="top",
+            fontsize=12,
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.7, edgecolor="none")
+        )
 
     plt.tight_layout()
     if outpath is not None:
@@ -683,9 +709,11 @@ fig3_boxplot_two_panels_pct(
     macros_low=macros_low,
     muni_shp=MUNI_SHP,
     outpath=FIGDIR / "Fig3_Distribution_across_municipalities_macroclass_year_normalized_two_panels.png",
-    add_sig_summary=True,   # set False if scipy/statsmodels not installed
+    add_sig_summary=True,
+    bottom_ylim=(0, 14),          # <-- adjust to what looks best
+    legend_anchor=(0.7, 0.98),   # inside top-left of ax1
+    sig_anchor=(0.7, 0.5),      # inside top panel, right-ish
 )
-
 
 
 PAIRWISE_CSV = FIGDIR / "TableS1_Wilcoxon_consecutive_plus_1950_2020_TOTAL_pct_muni_area.csv"
