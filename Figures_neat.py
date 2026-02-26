@@ -18,6 +18,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from scipy.stats import friedmanchisquare
+from statsmodels.stats.multitest import multipletests
+from scipy.stats import wilcoxon
 
 CRS_CANON = "EPSG:6708"
 
@@ -233,6 +236,181 @@ def macro_share_pct_by_year(
     out = out.dropna(subset=["muni_area_km2"]).copy()
     out["share_pct"] = 100.0 * out["area_km2"] / out["muni_area_km2"]
     return out[[MUNI_ID, "share_pct"]]
+
+def _prep_pct_muni_area(df_in: pd.DataFrame, macros: List[str], muni_shp: Path) -> pd.DataFrame:
+    require_geopandas()
+
+    muni = gpd.read_file(muni_shp)
+    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+
+    df_key = df_in.copy()
+    df_key[MUNI_ID] = df_key[MUNI_ID].astype(str)
+
+    muni_area = get_muni_area_km2(muni)
+
+    d = df_key[(df_key["hazard"] == "TOTAL") & (df_key["macro_class"].isin(macros))].copy()
+    g = d.groupby(["year", "macro_class", MUNI_ID], as_index=False, observed=False)["area_km2"].sum()
+
+    g = g.merge(muni_area, on=MUNI_ID, how="left").dropna(subset=["muni_area_km2"]).copy()
+    g["pct_muni_area"] = (g["area_km2"] / g["muni_area_km2"]) * 100.0
+    return g
+
+
+def _friedman_by_macro(g: pd.DataFrame, macros: List[str]) -> pd.DataFrame:
+    """
+    Friedman test across years (repeated measures), per macro.
+    Uses complete cases (municipalities present in ALL years for that macro).
+    """
+    out = []
+    years = sorted(g["year"].unique())
+
+    for m in macros:
+        gm = g[g["macro_class"] == m].copy()
+        wide = gm.pivot_table(index=MUNI_ID, columns="year", values="pct_muni_area", aggfunc="sum").dropna(axis=0)
+
+        if wide.shape[0] < 5:  # too few municipalities for a meaningful test
+            out.append({"macro_class": m, "n_muni": wide.shape[0], "friedman_p": np.nan})
+            continue
+
+        args = [wide[y].values for y in years]
+        stat, p = friedmanchisquare(*args)
+        out.append({"macro_class": m, "n_muni": wide.shape[0], "friedman_p": float(p)})
+
+    res = pd.DataFrame(out)
+    mask = res["friedman_p"].notna()
+    res["friedman_p_fdr"] = np.nan
+    if mask.any():
+        res.loc[mask, "friedman_p_fdr"] = multipletests(res.loc[mask, "friedman_p"], method="fdr_bh")[1]
+    return res
+
+def _prep_pct_muni_area_total(df_in: pd.DataFrame, macros: List[str], muni_shp: Path) -> pd.DataFrame:
+    """
+    Build a long table with pct_muni_area (% of municipal area) for TOTAL land use.
+    Output columns: year, macro_class, PRO_COM, pct_muni_area
+    """
+    require_geopandas()
+
+    muni = gpd.read_file(muni_shp)
+    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+    muni_area = get_muni_area_km2(muni)
+
+    d = df_in[(df_in["hazard"] == "TOTAL") & (df_in["macro_class"].isin(macros))].copy()
+    d[MUNI_ID] = d[MUNI_ID].astype(str)
+
+    g = d.groupby(["year", "macro_class", MUNI_ID], as_index=False, observed=False)["area_km2"].sum()
+    g = g.merge(muni_area, on=MUNI_ID, how="left").dropna(subset=["muni_area_km2"]).copy()
+    g["pct_muni_area"] = 100.0 * g["area_km2"] / g["muni_area_km2"]
+    return g[["year", "macro_class", MUNI_ID, "pct_muni_area"]]
+
+def pairwise_wilcoxon_consecutive_plus_endpoints_table_macros(
+    df_in: pd.DataFrame,
+    macros: List[str],
+    muni_shp: Path,
+    years: Optional[List[int]] = None,
+    add_endpoint_pair: bool = True,
+    p_adjust_within_macro: str = "holm",
+    p_adjust_global: str = "fdr_bh",
+    min_n: int = 8,
+    out_csv: Optional[Path] = None,
+) -> pd.DataFrame:
+    """
+    Pairwise Wilcoxon signed-rank tests on % municipality area (TOTAL), paired by municipality:
+      - consecutive epoch pairs: (y1->y2), (y2->y3), ...
+      - optionally also endpoint pair: (first->last), e.g., 1950->2020
+
+    Output columns:
+      macro_class, year_a, year_b, n_muni, median_a, median_b, median_diff,
+      p_raw, p_adj_within_macro, p_adj_global
+    """
+    g = _prep_pct_muni_area_total(df_in, macros, muni_shp)
+
+    if years is None:
+        years = sorted(g["year"].unique().tolist())
+    else:
+        years = sorted(list(years))
+
+    if len(years) < 2:
+        return pd.DataFrame()
+
+    # Build requested pairs
+    pairs = list(zip(years[:-1], years[1:]))  # consecutive
+    if add_endpoint_pair:
+        endpoint = (years[0], years[-1])
+        if endpoint not in pairs:
+            pairs.append(endpoint)
+
+    rows = []
+    for m in macros:
+        gm = g[g["macro_class"] == m].copy()
+        if gm.empty:
+            continue
+
+        wide = gm.pivot_table(index=MUNI_ID, columns="year", values="pct_muni_area", aggfunc="sum")
+
+        for ya, yb in pairs:
+            if ya not in wide.columns or yb not in wide.columns:
+                rows.append({
+                    "macro_class": m, "year_a": ya, "year_b": yb, "n_muni": 0,
+                    "median_a": np.nan, "median_b": np.nan, "median_diff": np.nan,
+                    "p_raw": np.nan
+                })
+                continue
+
+            pair = wide[[ya, yb]].dropna(axis=0)
+            n = int(pair.shape[0])
+
+            if n < min_n:
+                rows.append({
+                    "macro_class": m, "year_a": ya, "year_b": yb, "n_muni": n,
+                    "median_a": float(np.nanmedian(pair[ya].values)) if n > 0 else np.nan,
+                    "median_b": float(np.nanmedian(pair[yb].values)) if n > 0 else np.nan,
+                    "median_diff": float(np.nanmedian((pair[yb] - pair[ya]).values)) if n > 0 else np.nan,
+                    "p_raw": np.nan
+                })
+                continue
+
+            diffs = (pair[yb] - pair[ya]).values
+
+            try:
+                stat, p = wilcoxon(diffs, zero_method="wilcox", alternative="two-sided", method="auto")
+            except TypeError:
+                stat, p = wilcoxon(diffs, zero_method="wilcox", alternative="two-sided")
+
+            rows.append({
+                "macro_class": m, "year_a": ya, "year_b": yb, "n_muni": n,
+                "median_a": float(np.median(pair[ya].values)),
+                "median_b": float(np.median(pair[yb].values)),
+                "median_diff": float(np.median(diffs)),
+                "p_raw": float(p)
+            })
+
+    res = pd.DataFrame(rows)
+
+    # Within-macro correction across requested pairs (consecutive + endpoint)
+    res["p_adj_within_macro"] = np.nan
+    for m in res["macro_class"].dropna().unique():
+        mask = (res["macro_class"] == m) & res["p_raw"].notna()
+        if mask.sum() >= 1:
+            res.loc[mask, "p_adj_within_macro"] = multipletests(
+                res.loc[mask, "p_raw"].values, method=p_adjust_within_macro
+            )[1]
+
+    # Global correction across all macro×pair tests (optional sensitivity)
+    res["p_adj_global"] = np.nan
+    mask_all = res["p_raw"].notna()
+    if mask_all.sum() >= 1:
+        res.loc[mask_all, "p_adj_global"] = multipletests(
+            res.loc[mask_all, "p_raw"].values, method=p_adjust_global
+        )[1]
+
+    # Order rows nicely: by macro then by (year_a, year_b)
+    res = res.sort_values(["macro_class", "year_a", "year_b"]).reset_index(drop=True)
+
+    if out_csv is not None:
+        res.to_csv(out_csv, index=False)
+
+    return res
+
 # -----------------------------
 # LOAD + BASIC CLEANUP
 # -----------------------------
@@ -379,108 +557,151 @@ fig2_study_area_composition(df, FIGDIR / "Fig2_Land_use_composition_over_time.pn
 
 
 # ============================================================
-# FIG 3 — Boxplots across ALL municipalities (TOTAL), NORMALIZED
+# FIG 3 and Table 3 — Boxplots across ALL municipalities (TOTAL), NORMALIZED
 # ============================================================
-def fig3_boxplot_all_macros_one_fig_pct(
+def fig3_boxplot_two_panels_pct(
     df_in: pd.DataFrame,
-    macros: List[str],
+    macros_high: List[str],
+    macros_low: List[str],
     muni_shp: Path,
     outpath: Optional[Path] = None,
+    add_sig_summary: bool = True,
 ) -> None:
     """
-    All macro classes in ONE figure.
-    For each year: multiple boxplots (one per macro),
-    where values are normalized as (% of municipality area).
-
-    df must contain: year, hazard, macro_class, PRO_COM, area_km2
-    muni_shp must contain: PRO_COM and either Area_kmq or a valid geometry.
+    Fig 3: two-panel boxplots (TOTAL only), normalized by municipality area (%).
+      (a) high-share macros
+      (b) low-share macros
+    Optionally adds Friedman significance summary (FDR corrected across macros).
     """
-    require_geopandas()
-
-    muni = gpd.read_file(muni_shp)
-    muni[MUNI_ID] = muni[MUNI_ID].astype(str)
-
-    df_key = df_in.copy()
-    df_key[MUNI_ID] = df_key[MUNI_ID].astype(str)
-
-    muni_area = get_muni_area_km2(muni)
-
-    d = df_key[(df_key["hazard"] == "TOTAL") & (df_key["macro_class"].isin(macros))].copy()
-
-    g = d.groupby(["year", "macro_class", MUNI_ID], as_index=False, observed=False)["area_km2"].sum()
-
-    g = g.merge(muni_area, on=MUNI_ID, how="left").dropna(subset=["muni_area_km2"]).copy()
-    g["pct_muni_area"] = (g["area_km2"] / g["muni_area_km2"]) * 100.0
+    macros_all = macros_high + macros_low
+    g = _prep_pct_muni_area(df_in, macros_all, muni_shp)
 
     years = sorted(g["year"].unique())
-    macros = [m for m in macros if m in g["macro_class"].unique()]
 
-    # consistent colors (same order as stacked bars)
-    macro_colors = {m: MACRO_COLORS.get(m, "#999999") for m in macros}
+    # Keep only macros actually present
+    present = set(g["macro_class"].astype(str).unique().tolist())
+    macros_high = [m for m in macros_high if m in present]
+    macros_low  = [m for m in macros_low  if m in present]
 
-    data, positions, box_colors = [], [], []
-    group_gap = 1.5
-    box_gap = 0.9
-    pos = 1.0
+    macro_colors = {m: MACRO_COLORS.get(m, "#999999") for m in (macros_high + macros_low)}
 
-    for y in years:
-        for m in macros:
-            vals = g[(g["year"] == y) & (g["macro_class"] == m)]["pct_muni_area"].values
-            data.append(vals)
-            positions.append(pos)
-            box_colors.append(macro_colors[m])
-            pos += box_gap
-        pos += group_gap
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    bp = ax.boxplot(
-        data,
-        positions=positions,
-        widths=0.6,
-        patch_artist=True,
-        showfliers=True,
+    fig, (ax1, ax2) = plt.subplots(
+        nrows=2, ncols=1, figsize=(12, 9),
+        sharex=True, gridspec_kw={"height_ratios": [1.1, 1.0]}
     )
 
-    for patch, color in zip(bp["boxes"], box_colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.8)
+    def _draw_panel(ax, macros_panel, panel_title: str):
+        data, positions, box_colors = [], [], []
+        group_gap = 1.5
+        box_gap = 0.9
+        pos = 1.0
 
-    for median in bp["medians"]:
-        median.set_color("black")
-        median.set_linewidth(1.5)
+        for y in years:
+            for m in macros_panel:
+                vals = g[(g["year"] == y) & (g["macro_class"] == m)]["pct_muni_area"].values
+                data.append(vals)
+                positions.append(pos)
+                box_colors.append(macro_colors[m])
+                pos += box_gap
+            pos += group_gap
 
-    # X-axis labels: one label per year (centered under group of boxes)
-    n_macros = len(macros)
-    year_centers = []
-    for i, y in enumerate(years):
-        start = i * n_macros
-        end = start + n_macros
-        center = np.mean(positions[start:end])
-        year_centers.append(center)
+        bp = ax.boxplot(
+            data,
+            positions=positions,
+            widths=0.6,
+            patch_artist=True,
+            showfliers=True,
+        )
 
-    ax.set_xticks(year_centers)
-    ax.set_xticklabels([str(y) for y in years], fontsize=12)
+        for patch, color in zip(bp["boxes"], box_colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.8)
 
-    ax.set_ylabel("Share of municipality area (%)")
+        for median in bp["medians"]:
+            median.set_color("black")
+            median.set_linewidth(1.5)
 
+        # One centered tick per year
+        n_macros = len(macros_panel)
+        year_centers = []
+        for i, y in enumerate(years):
+            start = i * n_macros
+            end = start + n_macros
+            year_centers.append(float(np.mean(positions[start:end])))
+
+        ax.set_title(panel_title, loc="left", fontsize=12)
+        ax.grid(axis="y", alpha=0.2)
+        return year_centers
+
+    year_centers = _draw_panel(ax1, macros_high, "(a) High-share macro-classes")
+    _draw_panel(ax2, macros_low, "(b) Low-share macro-classes")
+
+    ax2.set_xticks(year_centers)
+    ax2.set_xticklabels([str(y) for y in years], fontsize=12)
+
+    ax1.set_ylabel("Share of municipality area (%)")
+    ax2.set_ylabel("Share of municipality area (%)")
+
+    # One legend for whole figure
+    legend_macros = macros_high + macros_low
     legend_handles = [
         Patch(facecolor=macro_colors[m], edgecolor="black", label=MACRO_LABELS.get(m, m))
-        for m in macros
+        for m in legend_macros
     ]
-    ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1))
+    ax1.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1))
+
+    # Significance summary
+    if add_sig_summary:
+        stats = _friedman_by_macro(g, legend_macros)
+
+        def stars(p):
+            if pd.isna(p): return "n/a"
+            if p < 0.001: return "***"
+            if p < 0.01:  return "**"
+            if p < 0.05:  return "*"
+            return "ns"
+
+        parts = []
+        for _, r in stats.iterrows():
+            label = MACRO_LABELS.get(r["macro_class"], r["macro_class"])
+            parts.append(f"{label} {stars(r['friedman_p_fdr'])}")
+
+        txt = "Across-year change (Friedman, FDR-corrected): " + "; ".join(parts)
+        ax2.text(0.0, -0.28, txt, transform=ax2.transAxes, fontsize=10, va="top")
 
     plt.tight_layout()
     if outpath is not None:
         plt.savefig(outpath, dpi=300)
         plt.close()
 
-fig3_boxplot_all_macros_one_fig_pct(
+macros_high = ["agriculture", "natural_green"]
+macros_low  = ["non_residential_industry", "residential", "services_infrastructure", "green_urban"]
+
+fig3_boxplot_two_panels_pct(
     df,
-    macros6,
+    macros_high=macros_high,
+    macros_low=macros_low,
     muni_shp=MUNI_SHP,
-    outpath=FIGDIR / "Fig3_Distribution_across_municipalities_macroclass_year_normalized.png",
+    outpath=FIGDIR / "Fig3_Distribution_across_municipalities_macroclass_year_normalized_two_panels.png",
+    add_sig_summary=True,   # set False if scipy/statsmodels not installed
 )
 
+
+
+PAIRWISE_CSV = FIGDIR / "TableS1_Wilcoxon_consecutive_plus_1950_2020_TOTAL_pct_muni_area.csv"
+
+tbl_pw = pairwise_wilcoxon_consecutive_plus_endpoints_table_macros(
+    df_in=df,
+    macros=macros6,
+    muni_shp=MUNI_SHP,
+    years=[1950, 1970, 1980, 2000, 2020],
+    add_endpoint_pair=True,
+    min_n=8,
+    out_csv=PAIRWISE_CSV,
+)
+
+print("Saved Wilcoxon table to:", PAIRWISE_CSV)
+print(tbl_pw.to_string(index=False))
 
 # ============================================================
 # FIG 4 — Multi-panel municipality delta maps (PERCENT)
