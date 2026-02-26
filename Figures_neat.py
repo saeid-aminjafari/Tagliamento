@@ -648,25 +648,26 @@ def fig3_boxplot_two_panels_pct(
     muni_shp: Path,
     outpath: Optional[Path] = None,
     add_sig_summary: bool = True,
-    # --- layout controls you asked for ---
-    legend_loc: str = "upper left",
-    legend_anchor: Tuple[float, float] = (0.02, 0.98),  # inside ax1
-    sig_anchor: Tuple[float, float] = (0.60, 0.98),     # inside ax1, right-ish
-    bottom_ylim: Optional[Tuple[float, float]] = (0.0, 15.0),  # set as you want
+    # per-panel legend placement
+    legend_high_loc: str = "upper left",
+    legend_high_anchor: Tuple[float, float] = (0.02, 0.98),
+    legend_low_loc: str = "upper left",
+    legend_low_anchor: Tuple[float, float] = (0.02, 0.98),
+    # per-panel significance placement
+    sig_high_anchor: Tuple[float, float] = (0.60, 0.98),
+    sig_low_anchor: Tuple[float, float] = (0.60, 0.98),
+    bottom_ylim: Optional[Tuple[float, float]] = (0.0, 15.0),
+    top_ylim: Optional[Tuple[float, float]] = (0.0, 15.0),
 ) -> None:
     """
-    Fig 3: two-panel boxplots (TOTAL only), normalized by municipality area (%).
-      (a) high-share macros
-      (b) low-share macros
-    Legend + significance summary are placed INSIDE the top panel.
-    Bottom y-limits can be forced for readability.
+    Two-panel boxplots with a COMMON x-position grid so year labels align perfectly
+    even when panels have different numbers of boxes per year.
+    Legends + significance are split by panel (top: high macros; bottom: low macros).
     """
     macros_all = macros_high + macros_low
     g = _prep_pct_muni_area(df_in, macros_all, muni_shp)
-
     years = sorted(g["year"].unique())
 
-    # Keep only macros actually present
     present = set(g["macro_class"].astype(str).unique().tolist())
     macros_high = [m for m in macros_high if m in present]
     macros_low  = [m for m in macros_low  if m in present]
@@ -678,20 +679,33 @@ def fig3_boxplot_two_panels_pct(
         sharex=True, gridspec_kw={"height_ratios": [1.1, 1.0]}
     )
 
-    def _draw_panel(ax, macros_panel, panel_title: str):
-        data, positions, box_colors = [], [], []
-        group_gap = 1.5
-        box_gap = 0.9
-        pos = 1.0
+    # ---- COMMON GRID PARAMETERS ----
+    K = max(len(macros_high), len(macros_low))
+    group_gap = 1.5
+    box_gap = 0.9
+    start_pos = 1.0
 
+    year_slot_positions: Dict[int, List[float]] = {}
+    pos = start_pos
+    for y in years:
+        slots = []
+        for _ in range(K):
+            slots.append(pos)
+            pos += box_gap
+        year_slot_positions[y] = slots
+        pos += group_gap
+
+    year_centers = [float(np.mean(year_slot_positions[y])) for y in years]
+
+    def _draw_panel_on_grid(ax, macros_panel: List[str], title: str):
+        data, positions, colors = [], [], []
         for y in years:
-            for m in macros_panel:
+            slots = year_slot_positions[y]
+            for i, m in enumerate(macros_panel):
                 vals = g[(g["year"] == y) & (g["macro_class"] == m)]["pct_muni_area"].values
                 data.append(vals)
-                positions.append(pos)
-                box_colors.append(macro_colors[m])
-                pos += box_gap
-            pos += group_gap
+                positions.append(slots[i])
+                colors.append(macro_colors[m])
 
         bp = ax.boxplot(
             data,
@@ -701,57 +715,65 @@ def fig3_boxplot_two_panels_pct(
             showfliers=True,
         )
 
-        for patch, color in zip(bp["boxes"], box_colors):
-            patch.set_facecolor(color)
+        for patch, c in zip(bp["boxes"], colors):
+            patch.set_facecolor(c)
             patch.set_alpha(0.8)
 
         for median in bp["medians"]:
             median.set_color("black")
             median.set_linewidth(1.5)
 
-        # One centered tick per year
-        n_macros = len(macros_panel)
-        year_centers = []
-        for i, y in enumerate(years):
-            start = i * n_macros
-            end = start + n_macros
-            year_centers.append(float(np.mean(positions[start:end])))
-
-        ax.set_title(panel_title, loc="left", fontsize=12)
+        ax.set_title(title, loc="left", fontsize=12)
         ax.grid(axis="y", alpha=0.2)
-        return year_centers
 
-    year_centers = _draw_panel(ax1, macros_high, "(a) High-share macro-classes")
-    _draw_panel(ax2, macros_low, "(b) Low-share macro-classes")
+    _draw_panel_on_grid(ax1, macros_high, "(a) High-share macro-classes")
+    _draw_panel_on_grid(ax2, macros_low,  "(b) Low-share macro-classes")
 
+    # X-axis: one tick per year at shared centers
     ax2.set_xticks(year_centers)
     ax2.set_xticklabels([str(y) for y in years], fontsize=12)
 
-    ax1.set_ylabel("Share of municipality area (%)")
-    ax2.set_ylabel("Share of municipality area (%)")
+    ax1.set_ylabel("Share of municipality area (%)", fontsize=14)
+    ax2.set_ylabel("Share of municipality area (%)", fontsize=14)
+    ax2.set_xlabel("Year", fontsize=14)
 
-    # ---- bottom panel y limits (your request) ----
     if bottom_ylim is not None:
         ax2.set_ylim(bottom_ylim[0], bottom_ylim[1])
+    if top_ylim is not None:
+        ax1.set_ylim(top_ylim[0], top_ylim[1])
 
-    # ---- legend INSIDE top panel ----
-    legend_macros = macros_high + macros_low
-    legend_handles = [
-        Patch(facecolor=macro_colors[m], edgecolor="black", label=MACRO_LABELS.get(m, m))
-        for m in legend_macros
-    ]
-    ax1.legend(
-        handles=legend_handles,
-        loc=legend_loc,
-        bbox_to_anchor=legend_anchor,   # axes fraction
-        borderaxespad=0.0,
-        frameon=True,
-        fontsize=12
-    )
+    # ---- legends split by panel ----
+    if macros_high:
+        handles_high = [
+            Patch(facecolor=macro_colors[m], edgecolor="black", label=MACRO_LABELS.get(m, m))
+            for m in macros_high
+        ]
+        ax1.legend(
+            handles=handles_high,
+            loc=legend_high_loc,
+            bbox_to_anchor=legend_high_anchor,
+            borderaxespad=0.0,
+            frameon=True,
+            fontsize=12
+        )
 
-    # ---- significance summary INSIDE top panel, vertically aligned ----
+    if macros_low:
+        handles_low = [
+            Patch(facecolor=macro_colors[m], edgecolor="black", label=MACRO_LABELS.get(m, m))
+            for m in macros_low
+        ]
+        ax2.legend(
+            handles=handles_low,
+            loc=legend_low_loc,
+            bbox_to_anchor=legend_low_anchor,
+            borderaxespad=0.0,
+            frameon=True,
+            fontsize=12
+        )
+
+    # ---- significance split by panel ----
     if add_sig_summary:
-        stats = _friedman_by_macro(g, legend_macros)
+        stats = _friedman_by_macro(g, macros_high + macros_low)
 
         def stars(p):
             if pd.isna(p): return "n/a"
@@ -760,43 +782,54 @@ def fig3_boxplot_two_panels_pct(
             if p < 0.05:  return "*"
             return "ns"
 
-        # enforce consistent order + vertical alignment
-        lines = ["Change significance (Friedman test):"]
-        for m in legend_macros:
-            row = stats.loc[stats["macro_class"] == m]
-            p = row["friedman_p_fdr"].iloc[0] if len(row) else np.nan
-            label = MACRO_LABELS.get(m, m)
-            lines.append(f"{label}: {stars(p)}")
+        def _panel_sig_text(macros_list: List[str]) -> str:
+            lines = ["Change significance (Friedman, FDR):\n"]
+            for m in macros_list:
+                row = stats.loc[stats["macro_class"] == m]
+                p = row["friedman_p_fdr"].iloc[0] if len(row) else np.nan
+                lines.append(f"{MACRO_LABELS.get(m, m)}: {stars(p)}")
+            return "\n".join(lines)
 
-        ax1.text(
-            sig_anchor[0], sig_anchor[1],
-            "\n".join(lines),
-            transform=ax1.transAxes,
-            ha="left", va="top",
-            fontsize=12,
-            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.7, edgecolor="none")
-        )
+        if macros_high:
+            ax1.text(
+                sig_high_anchor[0], sig_high_anchor[1],
+                _panel_sig_text(macros_high),
+                transform=ax1.transAxes,
+                ha="left", va="top",
+                fontsize=12,
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.7, edgecolor="none")
+            )
+
+        if macros_low:
+            ax2.text(
+                sig_low_anchor[0], sig_low_anchor[1],
+                _panel_sig_text(macros_low),
+                transform=ax2.transAxes,
+                ha="left", va="top",
+                fontsize=12,
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.7, edgecolor="none")
+            )
 
     plt.tight_layout()
     if outpath is not None:
         plt.savefig(outpath, dpi=300)
         plt.close()
 
-macros_high = ["agriculture", "natural_green"]
-macros_low  = ["non_residential_industry", "residential", "services_infrastructure", "green_urban"]
 
 fig3_boxplot_two_panels_pct(
     df,
-    macros_high=macros_high,
-    macros_low=macros_low,
+    macros_high=["agriculture", "natural_green"],
+    macros_low=["non_residential_industry", "residential", "services_infrastructure", "green_urban"],
     muni_shp=MUNI_SHP,
     outpath=FIGDIR / "Fig3_Distribution_across_municipalities_macroclass_year_normalized_two_panels.png",
     add_sig_summary=True,
-    bottom_ylim=(0, 14),          # <-- adjust to what looks best
-    legend_anchor=(0.7, 0.98),   # inside top-left of ax1
-    sig_anchor=(0.7, 0.5),      # inside top panel, right-ish
+    bottom_ylim=(0, 14),
+    top_ylim=(0, 110),
+    legend_high_anchor=(0.02, 0.98),
+    sig_high_anchor=(0.55, 0.98),
+    legend_low_anchor=(0.02, 0.98),
+    sig_low_anchor=(0.55, 0.98),
 )
-
 
 PAIRWISE_CSV = FIGDIR / "TableS1_Wilcoxon_consecutive_plus_1950_2020_TOTAL_pct_muni_area.csv"
 
