@@ -236,6 +236,88 @@ def macro_share_pct_by_year(
     out = out.dropna(subset=["muni_area_km2"]).copy()
     out["share_pct"] = 100.0 * out["area_km2"] / out["muni_area_km2"]
     return out[[MUNI_ID, "share_pct"]]
+# -----------------------------
+# LOAD + BASIC CLEANUP
+# -----------------------------
+df = pd.read_csv(LONG_CSV)
+
+# -----------------------------
+# ADD not_mapped_2020 relative to MOLAND footprint (Option B)
+# -----------------------------
+NOT_MAPPED_LABEL = "not_mapped_2020"
+
+if NOT_MAPPED_LABEL not in MACRO_ORDER:
+    MACRO_ORDER = MACRO_ORDER + [NOT_MAPPED_LABEL]
+MACRO_LABELS[NOT_MAPPED_LABEL] = "Not mapped (2020)"
+MACRO_COLORS[NOT_MAPPED_LABEL] = "#D0D0D0"
+
+# ensure types (do this BEFORE any grouping)
+df["year"] = df["year"].astype(int)
+df["hazard"] = df["hazard"].astype(str)
+df["macro_class"] = df["macro_class"].astype(str)
+df["area_km2"] = pd.to_numeric(df["area_km2"], errors="coerce").fillna(0.0)
+df[MUNI_ID] = df[MUNI_ID].astype(str)
+
+# Load municipality names ONLY for attaching labels to synthetic rows
+require_geopandas()
+muni = gpd.read_file(MUNI_SHP)
+muni[MUNI_ID] = muni[MUNI_ID].astype(str)
+names = muni[[MUNI_ID, MUNI_NAME]].drop_duplicates(subset=[MUNI_ID])
+
+ref_years = [1950, 1970, 1980, 2000]
+
+# 1) reference footprint per municipality = mean mapped area over ref years
+ref_footprint = (
+    df[(df["hazard"] == "TOTAL") & (df["year"].isin(ref_years))]
+    .groupby([MUNI_ID, "year"], as_index=False)["area_km2"].sum()
+    .groupby(MUNI_ID, as_index=False)["area_km2"].mean()
+    .rename(columns={"area_km2": "ref_km2"})
+)
+
+# 2) mapped 2020 per municipality
+mapped_2020 = (
+    df[(df["hazard"] == "TOTAL") & (df["year"] == 2020)]
+    .groupby(MUNI_ID, as_index=False)["area_km2"].sum()
+    .rename(columns={"area_km2": "mapped_km2"})
+)
+
+# 3) missing in 2020 relative to reference footprint (NOT municipality geometry)
+miss = ref_footprint.merge(mapped_2020, on=MUNI_ID, how="left").fillna({"mapped_km2": 0.0})
+miss["missing_km2"] = miss["ref_km2"] - miss["mapped_km2"]
+
+# clamp tiny negatives
+eps = 1e-3
+miss.loc[miss["missing_km2"].between(-eps, 0), "missing_km2"] = 0.0
+
+# hard fail only if seriously negative
+if (miss["missing_km2"] < -eps).any():
+    bad = miss.loc[miss["missing_km2"] < -eps, [MUNI_ID, "ref_km2", "mapped_km2", "missing_km2"]]
+    raise ValueError(f"Some municipalities have mapped_2020 > ref footprint.\n{bad.head(10)}")
+
+# add synthetic rows (TOTAL only)
+add = miss.loc[miss["missing_km2"] > eps, [MUNI_ID, "missing_km2"]].copy()
+if not add.empty:
+    add = add.rename(columns={"missing_km2": "area_km2"})
+    add["year"] = 2020
+    add["hazard"] = "TOTAL"
+    add["macro_class"] = NOT_MAPPED_LABEL
+    add = add.merge(names, on=MUNI_ID, how="left")  # attach COMUNE (optional)
+    df = pd.concat([df, add[[MUNI_ID, MUNI_NAME, "year", "hazard", "macro_class", "area_km2"]]], ignore_index=True)
+
+# apply categorical ordering AFTER adding synthetic rows
+df["macro_class"] = pd.Categorical(df["macro_class"], categories=MACRO_ORDER, ordered=True)
+
+# quick print check
+tot_ref = (
+    df[(df["hazard"] == "TOTAL") & (df["year"].isin(ref_years))]
+    .groupby("year")["area_km2"].sum()
+)
+tot_2020 = (
+    df[(df["hazard"] == "TOTAL") & (df["year"] == 2020)]
+    .groupby("year")["area_km2"].sum()
+)
+print("TOTAL area check (km2):")
+print(pd.concat([tot_ref, tot_2020]).to_string())
 
 def _prep_pct_muni_area(df_in: pd.DataFrame, macros: List[str], muni_shp: Path) -> pd.DataFrame:
     require_geopandas()
