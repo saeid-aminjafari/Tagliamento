@@ -1106,7 +1106,7 @@ def fig_panel_baseline_baseline_delta_pct(
                     va="center",
                     ha="left",
                     rotation=90,
-                    fontsize=18,
+                    fontsize=24,
                 )
 
     # ---- Colorbars aligned with SECOND ROW (same as your original intent) ----
@@ -1135,12 +1135,12 @@ def fig_panel_baseline_baseline_delta_pct(
     cax1 = fig.add_axes([cbar_x, y0, cbar_w, h])
     cbar1 = fig.colorbar(sm_base, cax=cax1)
     cbar1.set_label("Share of municipality area (%)", fontsize=20)
-    cbar1.ax.tick_params(labelsize=20)
+    cbar1.ax.tick_params(labelsize=22)
 
     cax2 = fig.add_axes([bbox_col3.x1 + 0.015, y0, 0.018, h])
     cbar2 = fig.colorbar(sm_delta, cax=cax2)
     cbar2.set_label("Δ share (%)", fontsize=20)
-    cbar2.ax.tick_params(labelsize=20)
+    cbar2.ax.tick_params(labelsize=22)
 
     plt.savefig(outpath, dpi=300)
     plt.close()
@@ -1149,7 +1149,7 @@ def fig_panel_baseline_baseline_delta_pct(
 fig_panel_baseline_baseline_delta_pct(
     df_in=df,
     muni_shp=MUNI_SHP,
-    macros=["agriculture", "natural_green", "residential", "services_infrastructure"],
+    macros=["agriculture", "natural_green", "non_residential_industry", "residential", "services_infrastructure"],
     year0=1950,
     year1=2020,
     outpath=FIGDIR / "Fig5_Baseline and long-term change municipality-normalized.png",
